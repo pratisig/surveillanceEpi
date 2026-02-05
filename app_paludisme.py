@@ -44,12 +44,12 @@ from shapely.geometry import Point
 # ============================================================
 # CONFIG STREAMLIT
 # ============================================================
-st.set_page_config(
-    layout="wide", 
-    page_title="🦟 Surveillance Paludisme", 
-    page_icon="🦟",
-    initial_sidebar_state="expanded"
-)
+#st.set_page_config(
+   # layout="wide", 
+   # page_title="🦟 Surveillance Paludisme", 
+  #  page_icon="🦟",
+   # initial_sidebar_state="expanded"
+#)
 
 # CSS personnalisé
 st.markdown("""
@@ -3350,6 +3350,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
