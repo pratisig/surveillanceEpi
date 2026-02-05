@@ -123,14 +123,9 @@ st.markdown("""
         letter-spacing: 2px;
     }
     
-    /* Boutons de lancement en haut */
-    .launch-button-container {
-        text-align: center;
-        margin: 1.5rem 0;
-    }
-    
-    /* Surcharge style boutons Streamlit avec couleurs MSF */
-    div[data-testid="column"] > div > div > div > button {
+    /* Style des page_link comme des boutons */
+    a[data-testid="stPageLink-NavLink"] {
+        display: block !important;
         width: 100% !important;
         background: white !important;
         color: #E4032E !important;
@@ -141,28 +136,17 @@ st.markdown("""
         border-radius: 10px !important;
         transition: all 0.3s ease !important;
         box-shadow: 0 4px 15px rgba(228, 3, 46, 0.3) !important;
-        text-transform: uppercase;
+        text-transform: uppercase !important;
+        text-align: center !important;
+        text-decoration: none !important;
+        margin: 1.5rem 0 !important;
     }
     
-    div[data-testid="column"] > div > div > div > button:hover {
+    a[data-testid="stPageLink-NavLink"]:hover {
         background: #E4032E !important;
         color: white !important;
         transform: scale(1.05) !important;
         box-shadow: 0 6px 20px rgba(228, 3, 46, 0.5) !important;
-    }
-    
-    /* Boutons documentation */
-    .stButton > button {
-        background: white !important;
-        color: #E4032E !important;
-        border: 2px solid #E4032E !important;
-        font-weight: bold !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stButton > button:hover {
-        background: #E4032E !important;
-        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -191,12 +175,8 @@ st.markdown("""
 col1, col2 = st.columns(2)
 
 with col1:
-    # BOUTON EN HAUT
-    st.markdown('<div class="launch-button-container">', unsafe_allow_html=True)
-    if st.button("🦟 LANCER L'APPLICATION PALUDISME", key="btn_palu", use_container_width=True):
-        # CORRECTION ICI - Utilisez le nom exact du fichier
-        st.switch_page("pages/app_paludisme.py")  # OU le nom exact de votre fichier
-    st.markdown('</div>', unsafe_allow_html=True)
+    # BOUTON AVEC PAGE_LINK (plus fiable que switch_page)
+    st.page_link("pages/1_🦟_Paludisme.py", label="🦟 LANCER L'APPLICATION PALUDISME", icon="🦟")
     
     # CARTE DESCRIPTIVE
     st.markdown("""
@@ -225,12 +205,8 @@ with col1:
     """, unsafe_allow_html=True)
 
 with col2:
-    # BOUTON EN HAUT
-    st.markdown('<div class="launch-button-container">', unsafe_allow_html=True)
-    if st.button("🦠 LANCER L'APPLICATION ROUGEOLE", key="btn_rougeole", use_container_width=True):
-        # CORRECTION ICI - Utilisez le nom exact du fichier
-        st.switch_page("pages/app_rougeole.py")  # OU le nom exact de votre fichier
-    st.markdown('</div>', unsafe_allow_html=True)
+    # BOUTON AVEC PAGE_LINK
+    st.page_link("pages/2_🦠_Rougeole.py", label="🦠 LANCER L'APPLICATION ROUGEOLE", icon="🦠")
     
     # CARTE DESCRIPTIVE
     st.markdown("""
@@ -281,8 +257,7 @@ with col1:
         <p style="color:#58595B;">Guide détaillé pas-à-pas pour utiliser chaque module, interpréter les résultats et optimiser vos analyses.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("📖 Consulter le manuel", key="btn_manuel", use_container_width=True):
-        st.switch_page("pages/app_manuel.py")  # CORRECTION ICI
+    st.page_link("pages/3_📚_Manuel.py", label="📖 Consulter le manuel", icon="📖")
 
 with col2:
     st.markdown("""
@@ -291,8 +266,7 @@ with col2:
         <p style="color:#58595B;">Explication des algorithmes de machine learning, validation croisée temporelle et feature engineering.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("🔬 Voir la méthodologie", key="btn_methodo", use_container_width=True):
-        st.switch_page("pages/app_manuel.py")  # CORRECTION ICI
+    st.page_link("pages/3_📚_Manuel.py", label="🔬 Voir la méthodologie", icon="🔬")
 
 with col3:
     st.markdown("""
@@ -301,8 +275,7 @@ with col3:
         <p style="color:#58595B;">Définitions des variables (lags, moyennes mobiles, ACP, clustering spatial, etc.) et concepts clés.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("💡 Accéder au glossaire", key="btn_glossaire", use_container_width=True):
-        st.switch_page("pages/app_manuel.py")  # CORRECTION ICI
+    st.page_link("pages/3_📚_Manuel.py", label="💡 Accéder au glossaire", icon="💡")
 
 # Séparateur
 st.markdown("---")
