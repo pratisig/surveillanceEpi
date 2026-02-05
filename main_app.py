@@ -43,6 +43,7 @@ st.markdown("""
     
     .app-card-rougeole {
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 100%);
     }
     
     .app-card h3 {
@@ -103,22 +104,30 @@ st.markdown("""
         opacity: 0.9;
     }
     
-    /* Boutons */
-    .stButton > button {
-        width: 100%;
-        background: white;
-        color: #667eea;
-        border: none;
-        padding: 1rem 2rem;
-        font-size: 1.1rem;
-        font-weight: bold;
-        border-radius: 10px;
-        transition: all 0.3s ease;
+    /* Boutons de lancement en haut */
+    .launch-button-container {
+        text-align: center;
+        margin: 1.5rem 0;
     }
     
-    .stButton > button:hover {
-        background: #f0f0f0;
-        transform: scale(1.05);
+    /* Surcharge style boutons Streamlit */
+    div[data-testid="column"] > div > div > div > button {
+        width: 100% !important;
+        background: white !important;
+        color: #667eea !important;
+        border: 2px solid white !important;
+        padding: 1rem 2rem !important;
+        font-size: 1.2rem !important;
+        font-weight: bold !important;
+        border-radius: 10px !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+    }
+    
+    div[data-testid="column"] > div > div > div > button:hover {
+        background: #f0f0f0 !important;
+        transform: scale(1.05) !important;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -145,6 +154,13 @@ st.markdown("""
 col1, col2 = st.columns(2)
 
 with col1:
+    # BOUTON EN HAUT
+    st.markdown('<div class="launch-button-container">', unsafe_allow_html=True)
+    if st.button("🦟 LANCER L'APPLICATION PALUDISME", key="btn_palu", use_container_width=True):
+        st.switch_page("pages/1_🦟_Paludisme.py")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # CARTE DESCRIPTIVE
     st.markdown("""
     <div class="app-card">
         <h3>🦟 Paludisme</h3>
@@ -169,11 +185,15 @@ with col1:
         <em>Idéal pour planifier les campagnes de distribution de moustiquaires et les pulvérisations.</em>
     </div>
     """, unsafe_allow_html=True)
-    
-    if st.button("🦟 Accéder à l'application Paludisme", key="btn_palu"):
-        st.switch_page("pages/1_🦟_Paludisme.py")
 
 with col2:
+    # BOUTON EN HAUT
+    st.markdown('<div class="launch-button-container">', unsafe_allow_html=True)
+    if st.button("🦠 LANCER L'APPLICATION ROUGEOLE", key="btn_rougeole", use_container_width=True):
+        st.switch_page("pages/2_🦠_Rougeole.py")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # CARTE DESCRIPTIVE
     st.markdown("""
     <div class="app-card app-card-rougeole">
         <h3>🦠 Rougeole</h3>
@@ -199,9 +219,6 @@ with col2:
         <em>Essentiel pour préparer les campagnes de vaccination réactive et estimer les besoins en vaccins.</em>
     </div>
     """, unsafe_allow_html=True)
-    
-    if st.button("🦠 Accéder à l'application Rougeole", key="btn_rougeole"):
-        st.switch_page("pages/2_🦠_Rougeole.py")
 
 # Séparateur
 st.markdown("---")
@@ -225,7 +242,7 @@ with col1:
         <p>Guide détaillé pas-à-pas pour utiliser chaque module, interpréter les résultats et optimiser vos analyses.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("📖 Consulter le manuel", key="btn_manuel"):
+    if st.button("📖 Consulter le manuel", key="btn_manuel", use_container_width=True):
         st.switch_page("pages/3_📚_Manuel.py")
 
 with col2:
@@ -235,7 +252,7 @@ with col2:
         <p>Explication des algorithmes de machine learning, validation croisée temporelle et feature engineering.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("🔬 Voir la méthodologie", key="btn_methodo"):
+    if st.button("🔬 Voir la méthodologie", key="btn_methodo", use_container_width=True):
         st.switch_page("pages/3_📚_Manuel.py")
 
 with col3:
@@ -245,7 +262,7 @@ with col3:
         <p>Définitions des variables (lags, moyennes mobiles, ACP, clustering spatial, etc.) et concepts clés.</p>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("💡 Accéder au glossaire", key="btn_glossaire"):
+    if st.button("💡 Accéder au glossaire", key="btn_glossaire", use_container_width=True):
         st.switch_page("pages/3_📚_Manuel.py")
 
 # Séparateur
