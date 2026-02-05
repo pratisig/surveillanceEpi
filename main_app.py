@@ -114,8 +114,32 @@ st.markdown("""
         margin-bottom: 1rem;
         letter-spacing: 2px;
     }
+    
+    /* Boutons */
+    .stButton > button {
+        width: 100%;
+        background: white;
+        color: #E4032E;
+        border: 3px solid #E4032E;
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+        font-weight: bold;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+        text-transform: uppercase;
+    }
+    
+    .stButton > button:hover {
+        background: #E4032E;
+        color: white;
+        transform: scale(1.05);
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# Initialiser l'état de session pour la navigation
+if 'app_choice' not in st.session_state:
+    st.session_state.app_choice = "🏠 Accueil"
 
 # NAVIGATION DANS LA SIDEBAR
 with st.sidebar:
@@ -123,21 +147,23 @@ with st.sidebar:
     app_choice = st.selectbox(
         "Choisir l'application",
         ["🏠 Accueil", "🦟 Paludisme", "🦠 Rougeole", "📚 Manuel"],
-        index=0
+        index=["🏠 Accueil", "🦟 Paludisme", "🦠 Rougeole", "📚 Manuel"].index(st.session_state.app_choice)
     )
+    # Mettre à jour l'état
+    st.session_state.app_choice = app_choice
 
 # LOGIQUE DE NAVIGATION
-if app_choice == "🦟 Paludisme":
+if st.session_state.app_choice == "🦟 Paludisme":
     # Importer et exécuter l'app paludisme
     import app_paludisme
-    st.stop()  # Arrête l'exécution de main_app.py
+    st.stop()
     
-elif app_choice == "🦠 Rougeole":
+elif st.session_state.app_choice == "🦠 Rougeole":
     # Importer et exécuter l'app rougeole
     import app_rougeole
     st.stop()
     
-elif app_choice == "📚 Manuel":
+elif st.session_state.app_choice == "📚 Manuel":
     # Importer et exécuter le manuel
     import app_manuel
     st.stop()
@@ -158,7 +184,7 @@ st.markdown("""
 <div style="text-align:center; margin:2rem 0;">
     <h2 style="color:#E4032E;">Choisissez votre module d'analyse</h2>
     <p style="font-size:1.1rem; color:#58595B;">
-        Utilisez le menu de navigation dans la barre latérale gauche
+        Cliquez sur les boutons ci-dessous pour accéder aux applications
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -187,6 +213,11 @@ with col1:
         <em>Idéal pour planifier les campagnes de distribution de moustiquaires et les pulvérisations.</em>
     </div>
     """, unsafe_allow_html=True)
+    
+    # BOUTON FONCTIONNEL
+    if st.button("🦟 LANCER L'APPLICATION PALUDISME", key="btn_palu"):
+        st.session_state.app_choice = "🦟 Paludisme"
+        st.rerun()
 
 with col2:
     st.markdown("""
@@ -210,6 +241,11 @@ with col2:
         <em>Essentiel pour préparer les campagnes de vaccination réactive et estimer les besoins en vaccins.</em>
     </div>
     """, unsafe_allow_html=True)
+    
+    # BOUTON FONCTIONNEL
+    if st.button("🦠 LANCER L'APPLICATION ROUGEOLE", key="btn_rougeole"):
+        st.session_state.app_choice = "🦠 Rougeole"
+        st.rerun()
 
 # Séparateur
 st.markdown("---")
@@ -219,10 +255,48 @@ st.markdown("""
 <div style="background:#F5F5F5; padding:2rem; border-radius:15px; margin:2rem 0; border-left:5px solid #E4032E;">
     <h2 style="text-align:center; color:#E4032E;">📚 Documentation et Ressources</h2>
     <p style="text-align:center; font-size:1.1rem; color:#58595B;">
-        Utilisez le menu de navigation pour accéder au manuel complet
+        Guides complets, méthodologies et bonnes pratiques
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("""
+    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1); border-top:3px solid #E4032E;">
+        <h3 style="color:#E4032E;">📖 Manuel d'utilisation</h3>
+        <p style="color:#58595B;">Guide détaillé pas-à-pas pour utiliser chaque module, interpréter les résultats et optimiser vos analyses.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("📖 Consulter le manuel", key="btn_manuel"):
+        st.session_state.app_choice = "📚 Manuel"
+        st.rerun()
+
+with col2:
+    st.markdown("""
+    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1); border-top:3px solid #E4032E;">
+        <h3 style="color:#E4032E;">🔬 Méthodologie</h3>
+        <p style="color:#58595B;">Explication des algorithmes de machine learning, validation croisée temporelle et feature engineering.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("🔬 Voir la méthodologie", key="btn_methodo"):
+        st.session_state.app_choice = "📚 Manuel"
+        st.rerun()
+
+with col3:
+    st.markdown("""
+    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1); border-top:3px solid #E4032E;">
+        <h3 style="color:#E4032E;">💡 Glossaire</h3>
+        <p style="color:#58595B;">Définitions des variables (lags, moyennes mobiles, ACP, clustering spatial, etc.) et concepts clés.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("💡 Accéder au glossaire", key="btn_glossaire"):
+        st.session_state.app_choice = "📚 Manuel"
+        st.rerun()
+
+# Séparateur
+st.markdown("---")
 
 # Section Caractéristiques techniques
 st.markdown("""
