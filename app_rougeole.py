@@ -31,12 +31,12 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Configuration Streamlit
-st.set_page_config(
-    page_title="Surveillance Rougeole Multi-pays",
-    layout="wide",
-    page_icon="🦠",
-    initial_sidebar_state="expanded"
-)
+#st.set_page_config(
+#    page_title="Surveillance Rougeole Multi-pays",
+#    layout="wide",
+#    page_icon="🦠",
+#    initial_sidebar_state="expanded"
+#)
 
 # CSS personnalisé
 st.markdown("""
