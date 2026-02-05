@@ -194,7 +194,8 @@ with col1:
     # BOUTON EN HAUT
     st.markdown('<div class="launch-button-container">', unsafe_allow_html=True)
     if st.button("🦟 LANCER L'APPLICATION PALUDISME", key="btn_palu", use_container_width=True):
-        st.switch_page("pages/1_🦟_Paludisme.py")
+        # CORRECTION ICI - Utilisez le nom exact du fichier
+        st.switch_page("pages/app_paludisme.py")  # OU le nom exact de votre fichier
     st.markdown('</div>', unsafe_allow_html=True)
     
     # CARTE DESCRIPTIVE
@@ -227,7 +228,8 @@ with col2:
     # BOUTON EN HAUT
     st.markdown('<div class="launch-button-container">', unsafe_allow_html=True)
     if st.button("🦠 LANCER L'APPLICATION ROUGEOLE", key="btn_rougeole", use_container_width=True):
-        st.switch_page("pages/2_🦠_Rougeole.py")
+        # CORRECTION ICI - Utilisez le nom exact du fichier
+        st.switch_page("pages/app_rougeole.py")  # OU le nom exact de votre fichier
     st.markdown('</div>', unsafe_allow_html=True)
     
     # CARTE DESCRIPTIVE
@@ -280,7 +282,7 @@ with col1:
     </div>
     """, unsafe_allow_html=True)
     if st.button("📖 Consulter le manuel", key="btn_manuel", use_container_width=True):
-        st.switch_page("pages/3_📚_Manuel.py")
+        st.switch_page("pages/app_manuel.py")  # CORRECTION ICI
 
 with col2:
     st.markdown("""
@@ -290,7 +292,7 @@ with col2:
     </div>
     """, unsafe_allow_html=True)
     if st.button("🔬 Voir la méthodologie", key="btn_methodo", use_container_width=True):
-        st.switch_page("pages/3_📚_Manuel.py")
+        st.switch_page("pages/app_manuel.py")  # CORRECTION ICI
 
 with col3:
     st.markdown("""
@@ -300,7 +302,7 @@ with col3:
     </div>
     """, unsafe_allow_html=True)
     if st.button("💡 Accéder au glossaire", key="btn_glossaire", use_container_width=True):
-        st.switch_page("pages/3_📚_Manuel.py")
+        st.switch_page("pages/app_manuel.py")  # CORRECTION ICI
 
 # Séparateur
 st.markdown("---")
