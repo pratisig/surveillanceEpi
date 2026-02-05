@@ -123,30 +123,23 @@ st.markdown("""
         letter-spacing: 2px;
     }
     
-    /* Style des page_link comme des boutons */
-    a[data-testid="stPageLink-NavLink"] {
-        display: block !important;
-        width: 100% !important;
-        background: white !important;
-        color: #E4032E !important;
-        border: 3px solid #E4032E !important;
-        padding: 1rem 2rem !important;
-        font-size: 1.2rem !important;
-        font-weight: bold !important;
-        border-radius: 10px !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(228, 3, 46, 0.3) !important;
-        text-transform: uppercase !important;
-        text-align: center !important;
-        text-decoration: none !important;
-        margin: 1.5rem 0 !important;
+    /* Boutons */
+    .stButton > button {
+        width: 100%;
+        background: white;
+        color: #E4032E;
+        border: 2px solid #E4032E;
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+        font-weight: bold;
+        border-radius: 10px;
+        transition: all 0.3s ease;
     }
     
-    a[data-testid="stPageLink-NavLink"]:hover {
-        background: #E4032E !important;
-        color: white !important;
-        transform: scale(1.05) !important;
-        box-shadow: 0 6px 20px rgba(228, 3, 46, 0.5) !important;
+    .stButton > button:hover {
+        background: #E4032E;
+        color: white;
+        transform: scale(1.05);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -175,10 +168,6 @@ st.markdown("""
 col1, col2 = st.columns(2)
 
 with col1:
-    # BOUTON AVEC PAGE_LINK (plus fiable que switch_page)
-    st.page_link("pages/1_🦟_Paludisme.py", label="🦟 LANCER L'APPLICATION PALUDISME", icon="🦟")
-    
-    # CARTE DESCRIPTIVE
     st.markdown("""
     <div class="app-card">
         <h3>🦟 Paludisme</h3>
@@ -203,12 +192,11 @@ with col1:
         <em>Idéal pour planifier les campagnes de distribution de moustiquaires et les pulvérisations.</em>
     </div>
     """, unsafe_allow_html=True)
+    
+    if st.button("🦟 Accéder à l'application Paludisme", key="btn_palu"):
+        st.switch_page("pages/app_paludisme.py")
 
 with col2:
-    # BOUTON AVEC PAGE_LINK
-    st.page_link("pages/2_🦠_Rougeole.py", label="🦠 LANCER L'APPLICATION ROUGEOLE", icon="🦠")
-    
-    # CARTE DESCRIPTIVE
     st.markdown("""
     <div class="app-card app-card-rougeole">
         <h3>🦠 Rougeole</h3>
@@ -234,6 +222,9 @@ with col2:
         <em>Essentiel pour préparer les campagnes de vaccination réactive et estimer les besoins en vaccins.</em>
     </div>
     """, unsafe_allow_html=True)
+    
+    if st.button("🦠 Accéder à l'application Rougeole", key="btn_rougeole"):
+        st.switch_page("pages/app_rougeole.py")
 
 # Séparateur
 st.markdown("---")
@@ -257,7 +248,8 @@ with col1:
         <p style="color:#58595B;">Guide détaillé pas-à-pas pour utiliser chaque module, interpréter les résultats et optimiser vos analyses.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.page_link("pages/3_📚_Manuel.py", label="📖 Consulter le manuel", icon="📖")
+    if st.button("📖 Consulter le manuel", key="btn_manuel"):
+        st.switch_page("pages/app_manuel.py")
 
 with col2:
     st.markdown("""
@@ -266,7 +258,8 @@ with col2:
         <p style="color:#58595B;">Explication des algorithmes de machine learning, validation croisée temporelle et feature engineering.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.page_link("pages/3_📚_Manuel.py", label="🔬 Voir la méthodologie", icon="🔬")
+    if st.button("🔬 Voir la méthodologie", key="btn_methodo"):
+        st.switch_page("pages/app_manuel.py")
 
 with col3:
     st.markdown("""
@@ -275,7 +268,8 @@ with col3:
         <p style="color:#58595B;">Définitions des variables (lags, moyennes mobiles, ACP, clustering spatial, etc.) et concepts clés.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.page_link("pages/3_📚_Manuel.py", label="💡 Accéder au glossaire", icon="💡")
+    if st.button("💡 Accéder au glossaire", key="btn_glossaire"):
+        st.switch_page("pages/app_manuel.py")
 
 # Séparateur
 st.markdown("---")
