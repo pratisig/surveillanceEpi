@@ -1,7 +1,7 @@
 """
 ============================================================
 APPLICATION PRINCIPALE - PLATEFORME SURVEILLANCE ÉPIDÉMIOLOGIQUE
-Point d'entrée avec menu de navigation
+Développée pour Médecins Sans Frontières (MSF)
 ============================================================
 """
 
@@ -9,15 +9,24 @@ import streamlit as st
 
 # Configuration de la page (DOIT être la première commande Streamlit)
 st.set_page_config(
-    page_title="Plateforme Surveillance Épidémiologique",
+    page_title="MSF - Surveillance Épidémiologique",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personnalisé pour l'accueil
+# CSS personnalisé avec branding MSF
 st.markdown("""
 <style>
+    /* Couleurs MSF */
+    :root {
+        --msf-red: #E4032E;
+        --msf-dark-red: #B30024;
+        --msf-light-red: #FF1744;
+        --msf-grey: #58595B;
+        --msf-light-grey: #F5F5F5;
+    }
+    
     /* Conteneur principal */
     .main-container {
         max-width: 1200px;
@@ -27,23 +36,24 @@ st.markdown("""
     
     /* Cartes application */
     .app-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #E4032E 0%, #B30024 100%);
         border-radius: 15px;
         padding: 2rem;
         margin: 1rem 0;
         color: white;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        box-shadow: 0 10px 30px rgba(228, 3, 46, 0.3);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-left: 5px solid white;
     }
     
     .app-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        box-shadow: 0 15px 40px rgba(228, 3, 46, 0.4);
     }
     
     .app-card-rougeole {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 100%);
+        background: linear-gradient(135deg, #58595B 0%, #3a3b3d 100%);
+        border-left: 5px solid #E4032E;
     }
     
     .app-card h3 {
@@ -82,26 +92,35 @@ st.markdown("""
         padding-top: 1rem;
     }
     
-    /* Bannière en-tête */
+    /* Bannière en-tête MSF */
     .header-banner {
         text-align: center;
         padding: 3rem 1rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #E4032E 0%, #B30024 100%);
         border-radius: 15px;
         color: white;
         margin-bottom: 2rem;
+        border-bottom: 5px solid white;
     }
     
     .header-banner h1 {
         font-size: 2.5rem;
         margin: 0;
         font-weight: bold;
+        text-transform: uppercase;
     }
     
     .header-banner p {
         font-size: 1.2rem;
         margin: 1rem 0 0 0;
-        opacity: 0.9;
+        opacity: 0.95;
+    }
+    
+    .msf-logo-text {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        letter-spacing: 2px;
     }
     
     /* Boutons de lancement en haut */
@@ -110,41 +129,59 @@ st.markdown("""
         margin: 1.5rem 0;
     }
     
-    /* Surcharge style boutons Streamlit */
+    /* Surcharge style boutons Streamlit avec couleurs MSF */
     div[data-testid="column"] > div > div > div > button {
         width: 100% !important;
         background: white !important;
-        color: #667eea !important;
-        border: 2px solid white !important;
+        color: #E4032E !important;
+        border: 3px solid #E4032E !important;
         padding: 1rem 2rem !important;
         font-size: 1.2rem !important;
         font-weight: bold !important;
         border-radius: 10px !important;
         transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+        box-shadow: 0 4px 15px rgba(228, 3, 46, 0.3) !important;
+        text-transform: uppercase;
     }
     
     div[data-testid="column"] > div > div > div > button:hover {
-        background: #f0f0f0 !important;
+        background: #E4032E !important;
+        color: white !important;
         transform: scale(1.05) !important;
-        box-shadow: 0 6px 20px rgba(0,0,0,0.3) !important;
+        box-shadow: 0 6px 20px rgba(228, 3, 46, 0.5) !important;
+    }
+    
+    /* Boutons documentation */
+    .stButton > button {
+        background: white !important;
+        color: #E4032E !important;
+        border: 2px solid #E4032E !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton > button:hover {
+        background: #E4032E !important;
+        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# En-tête principal
+# En-tête principal MSF
 st.markdown("""
 <div class="header-banner">
+    <div class="msf-logo-text">MÉDECINS SANS FRONTIÈRES</div>
     <h1>🏥 Plateforme de Surveillance Épidémiologique</h1>
     <p>Outils d'analyse, cartographie et prédiction pour le paludisme et la rougeole</p>
+    <p style="font-size:0.9rem; margin-top:0.5rem; opacity:0.8;">Afrique de l'Ouest | Operational Research</p>
 </div>
 """, unsafe_allow_html=True)
 
 # Introduction
 st.markdown("""
 <div style="text-align:center; margin:2rem 0;">
-    <h2>Choisissez votre module d'analyse</h2>
-    <p style="font-size:1.1rem; color:#666;">
+    <h2 style="color:#E4032E;">Choisissez votre module d'analyse</h2>
+    <p style="font-size:1.1rem; color:#58595B;">
         Deux applications spécialisées pour une surveillance épidémiologique optimale
     </p>
 </div>
@@ -225,9 +262,9 @@ st.markdown("---")
 
 # Section Documentation
 st.markdown("""
-<div style="background:#f8f9fa; padding:2rem; border-radius:15px; margin:2rem 0;">
-    <h2 style="text-align:center; color:#333;">📚 Documentation et Ressources</h2>
-    <p style="text-align:center; font-size:1.1rem; color:#666;">
+<div style="background:#F5F5F5; padding:2rem; border-radius:15px; margin:2rem 0; border-left:5px solid #E4032E;">
+    <h2 style="text-align:center; color:#E4032E;">📚 Documentation et Ressources</h2>
+    <p style="text-align:center; font-size:1.1rem; color:#58595B;">
         Guides complets, méthodologies et bonnes pratiques
     </p>
 </div>
@@ -237,9 +274,9 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-        <h3 style="color:#667eea;">📖 Manuel d'utilisation</h3>
-        <p>Guide détaillé pas-à-pas pour utiliser chaque module, interpréter les résultats et optimiser vos analyses.</p>
+    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1); border-top:3px solid #E4032E;">
+        <h3 style="color:#E4032E;">📖 Manuel d'utilisation</h3>
+        <p style="color:#58595B;">Guide détaillé pas-à-pas pour utiliser chaque module, interpréter les résultats et optimiser vos analyses.</p>
     </div>
     """, unsafe_allow_html=True)
     if st.button("📖 Consulter le manuel", key="btn_manuel", use_container_width=True):
@@ -247,9 +284,9 @@ with col1:
 
 with col2:
     st.markdown("""
-    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-        <h3 style="color:#667eea;">🔬 Méthodologie</h3>
-        <p>Explication des algorithmes de machine learning, validation croisée temporelle et feature engineering.</p>
+    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1); border-top:3px solid #E4032E;">
+        <h3 style="color:#E4032E;">🔬 Méthodologie</h3>
+        <p style="color:#58595B;">Explication des algorithmes de machine learning, validation croisée temporelle et feature engineering.</p>
     </div>
     """, unsafe_allow_html=True)
     if st.button("🔬 Voir la méthodologie", key="btn_methodo", use_container_width=True):
@@ -257,9 +294,9 @@ with col2:
 
 with col3:
     st.markdown("""
-    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-        <h3 style="color:#667eea;">💡 Glossaire</h3>
-        <p>Définitions des variables (lags, moyennes mobiles, ACP, clustering spatial, etc.) et concepts clés.</p>
+    <div style="background:white; padding:1.5rem; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1); border-top:3px solid #E4032E;">
+        <h3 style="color:#E4032E;">💡 Glossaire</h3>
+        <p style="color:#58595B;">Définitions des variables (lags, moyennes mobiles, ACP, clustering spatial, etc.) et concepts clés.</p>
     </div>
     """, unsafe_allow_html=True)
     if st.button("💡 Accéder au glossaire", key="btn_glossaire", use_container_width=True):
@@ -271,7 +308,7 @@ st.markdown("---")
 # Section Caractéristiques techniques
 st.markdown("""
 <div style="text-align:center; margin:2rem 0;">
-    <h2>⚙️ Caractéristiques Techniques</h2>
+    <h2 style="color:#E4032E;">⚙️ Caractéristiques Techniques</h2>
 </div>
 """, unsafe_allow_html=True)
 
@@ -279,9 +316,9 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    <div style="text-align:center; padding:1rem;">
-        <h3 style="color:#667eea;">🗺️ Cartographie</h3>
-        <ul style="list-style:none; padding:0;">
+    <div style="text-align:center; padding:1rem; background:white; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1);">
+        <h3 style="color:#E4032E;">🗺️ Cartographie</h3>
+        <ul style="list-style:none; padding:0; color:#58595B;">
             <li>• Folium interactif</li>
             <li>• Popups enrichis</li>
             <li>• Couches multiples</li>
@@ -292,9 +329,9 @@ with col1:
 
 with col2:
     st.markdown("""
-    <div style="text-align:center; padding:1rem;">
-        <h3 style="color:#667eea;">🤖 Machine Learning</h3>
-        <ul style="list-style:none; padding:0;">
+    <div style="text-align:center; padding:1rem; background:white; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1);">
+        <h3 style="color:#E4032E;">🤖 Machine Learning</h3>
+        <ul style="list-style:none; padding:0; color:#58595B;">
             <li>• Gradient Boosting</li>
             <li>• Random Forest</li>
             <li>• Validation temporelle</li>
@@ -305,9 +342,9 @@ with col2:
 
 with col3:
     st.markdown("""
-    <div style="text-align:center; padding:1rem;">
-        <h3 style="color:#667eea;">📊 Sources Données</h3>
-        <ul style="list-style:none; padding:0;">
+    <div style="text-align:center; padding:1rem; background:white; border-radius:10px; box-shadow:0 2px 10px rgba(228,3,46,0.1);">
+        <h3 style="color:#E4032E;">📊 Sources Données</h3>
+        <ul style="list-style:none; padding:0; color:#58595B;">
             <li>• NASA POWER API</li>
             <li>• WorldPop (GEE)</li>
             <li>• Rasters environnement</li>
@@ -316,13 +353,17 @@ with col3:
     </div>
     """, unsafe_allow_html=True)
 
-# Footer
+# Footer MSF
 st.markdown("---")
 st.markdown("""
-<div style="text-align:center; color:#7f8c8d; padding:2rem;">
+<div style="text-align:center; color:#58595B; padding:2rem; background:#F5F5F5; border-radius:10px; border-top:3px solid #E4032E;">
+    <p style="font-size:1.3rem; font-weight:bold; color:#E4032E; margin-bottom:1rem;">MÉDECINS SANS FRONTIÈRES</p>
     <p style="font-size:1.1rem;"><strong>Développé par Youssoupha MBODJI</strong></p>
     <p>📧 Email : youssoupha.mbodji@example.com</p>
-    <p style="margin-top:1rem; font-size:0.9rem;">Version 3.0 | © 2026 - Licence Open Source MIT</p>
+    <p style="margin-top:1rem; font-size:0.9rem;">Version 3.0 | © 2026 MSF</p>
     <p style="font-size:0.9rem;">Plateforme de surveillance épidémiologique pour l'Afrique de l'Ouest</p>
+    <p style="font-size:0.85rem; margin-top:1rem; font-style:italic;">
+        "Bringing medical assistance to people affected by conflict, epidemics, disasters, or exclusion from healthcare"
+    </p>
 </div>
 """, unsafe_allow_html=True)
