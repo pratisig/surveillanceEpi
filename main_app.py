@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS personnalisé avec branding MSF ÉQUILIBRÉ
+# CSS personnalisé avec branding MSF ÉQUILIBRÉ (IDENTIQUE)
 st.markdown("""
 <style>
     /* Bannière en-tête MSF */
@@ -169,23 +169,34 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ============================================================
+# INITIALISATION DE L'ÉTAT
+# ============================================================
+if 'page_choice' not in st.session_state:
+    st.session_state.page_choice = "Accueil"
+
 # Navigation dans la sidebar
 with st.sidebar:
     st.markdown("### 🧭 Navigation")
     page = st.selectbox(
         "Choisir une application",
         ["Accueil", "Paludisme", "Rougeole", "Manuel"],
-        key="nav_select"
+        index=["Accueil", "Paludisme", "Rougeole", "Manuel"].index(st.session_state.page_choice)
     )
+    
+    # Mettre à jour l'état si changement dans le selectbox
+    if page != st.session_state.page_choice:
+        st.session_state.page_choice = page
+        st.rerun()
 
 # Routage selon la page sélectionnée
-if page == "Paludisme":
+if st.session_state.page_choice == "Paludisme":
     import app_paludisme
     
-elif page == "Rougeole":
+elif st.session_state.page_choice == "Rougeole":
     import app_rougeole
     
-elif page == "Manuel":
+elif st.session_state.page_choice == "Manuel":
     import app_manuel
     
 else:  # Page d'accueil
@@ -240,12 +251,9 @@ else:  # Page d'accueil
         </div>
         """, unsafe_allow_html=True)
         
-        # Créer une clé unique pour éviter les conflits
-        if 'btn_palu_clicked' not in st.session_state:
-            st.session_state.btn_palu_clicked = False
-            
+        # BOUTON CORRIGÉ
         if st.button("🦟 Accéder à l'application Paludisme", key="btn_palu_home"):
-            st.session_state.nav_select = "Paludisme"
+            st.session_state.page_choice = "Paludisme"
             st.rerun()
     
     with col2:
@@ -271,7 +279,7 @@ else:  # Page d'accueil
         """, unsafe_allow_html=True)
         
         if st.button("🦠 Accéder à l'application Rougeole", key="btn_rougeole_home"):
-            st.session_state.nav_select = "Rougeole"
+            st.session_state.page_choice = "Rougeole"
             st.rerun()
     
     # ============================================================
@@ -296,7 +304,7 @@ else:  # Page d'accueil
         </div>
         """, unsafe_allow_html=True)
         if st.button("📖 Consulter le manuel", key="btn_manuel_home"):
-            st.session_state.nav_select = "Manuel"
+            st.session_state.page_choice = "Manuel"
             st.rerun()
     
     with col2:
@@ -307,7 +315,7 @@ else:  # Page d'accueil
         </div>
         """, unsafe_allow_html=True)
         if st.button("🔬 Voir la méthodologie", key="btn_methodo_home"):
-            st.session_state.nav_select = "Manuel"
+            st.session_state.page_choice = "Manuel"
             st.rerun()
     
     with col3:
@@ -318,7 +326,7 @@ else:  # Page d'accueil
         </div>
         """, unsafe_allow_html=True)
         if st.button("💡 Accéder au glossaire", key="btn_glossaire_home"):
-            st.session_state.nav_select = "Manuel"
+            st.session_state.page_choice = "Manuel"
             st.rerun()
     
     # ============================================================
