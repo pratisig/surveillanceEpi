@@ -20,37 +20,29 @@ st.markdown("""
 <style>
     .main-header {
         font-size: 2.5rem;
-        color: #2E86AB;
+        color: #E4032E;  /* Rouge MSF */
         font-weight: bold;
         text-align: center;
         padding: 1rem;
     }
     
     .info-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #E4032E 0%, #B30024 100%);  /* Rouge MSF */
         border-radius: 15px;
         padding: 2rem;
         margin: 1rem 0;
         color: white;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        box-shadow: 0 10px 30px rgba(228, 3, 46, 0.3);
+        border-left: 5px solid white;
     }
     
-    .info-card h3 {
-        margin-top: 0;
-        font-size: 2rem;
-    }
-    
-    .info-card ul {
-        list-style: none;
-        padding-left: 0;
-        line-height: 1.8;
-    }
+    /* ... reste identique ... */
     
     .stButton > button {
         width: 100%;
         background: white;
-        color: #667eea;
-        border: 2px solid #667eea;
+        color: #E4032E;  /* Rouge MSF */
+        border: 2px solid #E4032E;  /* Rouge MSF */
         padding: 1rem 2rem;
         font-size: 1.1rem;
         font-weight: bold;
@@ -58,7 +50,7 @@ st.markdown("""
     }
     
     .stButton > button:hover {
-        background: #667eea;
+        background: #E4032E;  /* Rouge MSF */
         color: white;
     }
 </style>
@@ -75,7 +67,8 @@ with st.sidebar:
         "Choisir une application",
         ["Accueil", "Paludisme", "Rougeole", "Manuel"]
     )
-
+st.markdown('<p style="text-align:center; font-size:1.2rem; color:#E4032E;">MÉDECINS SANS FRONTIÈRES</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🏥 Plateforme de Surveillance Épidémiologique</h1>', unsafe_allow_html=True)
 # Routage selon la page sélectionnée
 if page == "Paludisme":
     import app_paludisme
