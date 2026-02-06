@@ -1174,13 +1174,12 @@ if df_cases is not None:
 # ============================================================
 # ONGLETS
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Dashboard", 
     "🗺️ Cartographie", 
     "🤖 Modélisation", 
     "📈 Analyse Avancée",
-    "📥 Export",
-    "📘 A Propos"
+    "📥 Export"
 ])
 
 # ============================================================
@@ -2749,6 +2748,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
