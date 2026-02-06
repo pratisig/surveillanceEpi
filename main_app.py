@@ -16,10 +16,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS personnalisé avec branding MSF ÉQUILIBRÉ
+# CSS personnalisé avec branding MSF ÉQUILIBRÉ (IDENTIQUE)
 st.markdown("""
 <style>
-    /* Bannière en-tête MSF */
     .header-banner {
         background: linear-gradient(135deg, #E4032E 0%, #C4032A 100%);
         border-radius: 12px;
@@ -49,7 +48,6 @@ st.markdown("""
         opacity: 0.95;
     }
     
-    /* Cartes application - VERSION CLAIRE */
     .app-card {
         background: white;
         border-radius: 12px;
@@ -100,7 +98,6 @@ st.markdown("""
         font-weight: 600;
     }
     
-    /* Boutons - Style MSF */
     .stButton > button {
         width: 100%;
         background: #E4032E;
@@ -122,7 +119,6 @@ st.markdown("""
         box-shadow: 0 5px 15px rgba(228, 3, 46, 0.4);
     }
     
-    /* Section info */
     .info-section {
         background: #F8F9FA;
         padding: 2rem;
@@ -157,7 +153,6 @@ st.markdown("""
         line-height: 1.5;
     }
     
-    /* Footer */
     .footer {
         text-align: center;
         color: #58595B;
@@ -180,77 +175,75 @@ if 'page_choice' not in st.session_state:
 with st.sidebar:
     st.markdown("### 🧭 Navigation")
     
-    # Debug : Vérification des fichiers (optionnel - à retirer en production)
-    with st.expander("🔍 Debug - Fichiers", expanded=False):
-        files_to_check = ["app_paludisme.py", "app_rougeole.py", "app_manuel.py"]
-        for file in files_to_check:
-            if os.path.exists(file):
-                st.success(f"✓ {file}")
-            else:
-                st.error(f"✗ {file} MANQUANT")
-    
     page = st.selectbox(
         "Choisir une application",
         ["Accueil", "Paludisme", "Rougeole", "Manuel"],
         index=["Accueil", "Paludisme", "Rougeole", "Manuel"].index(st.session_state.page_choice)
     )
     
-    # Mettre à jour l'état si changement dans le selectbox
     if page != st.session_state.page_choice:
         st.session_state.page_choice = page
         st.rerun()
 
 # ============================================================
-# ROUTAGE AVEC GESTION D'ERREURS
+# FONCTION POUR CHARGER LES APPLICATIONS
+# ============================================================
+def load_app(filename):
+    """Charge et exécute une application Python"""
+    try:
+        if os.path.exists(filename):
+            with open(filename, 'r', encoding='utf-8') as f:
+                code = f.read()
+                # Supprimer st.set_page_config s'il existe
+                lines = code.split('\n')
+                cleaned_lines = []
+                skip_next = 0
+                for i, line in enumerate(lines):
+                    if skip_next > 0:
+                        skip_next -= 1
+                        if ')' in line:
+                            skip_next = 0
+                        continue
+                    if 'st.set_page_config' in line:
+                        # Compter les lignes jusqu'à la fermeture
+                        if ')' not in line:
+                            skip_next = 10  # Max 10 lignes
+                        continue
+                    cleaned_lines.append(line)
+                
+                cleaned_code = '\n'.join(cleaned_lines)
+                exec(cleaned_code, globals())
+        else:
+            st.error(f"❌ Fichier '{filename}' introuvable")
+            st.warning(f"Assurez-vous que '{filename}' est dans le même dossier que main_app.py")
+            if st.button("🏠 Retour à l'accueil"):
+                st.session_state.page_choice = "Accueil"
+                st.rerun()
+    except Exception as e:
+        st.error(f"❌ Erreur lors du chargement de {filename}")
+        st.code(str(e))
+        with st.expander("📋 Détails de l'erreur"):
+            import traceback
+            st.code(traceback.format_exc())
+        if st.button("🏠 Retour à l'accueil"):
+            st.session_state.page_choice = "Accueil"
+            st.rerun()
+
+# ============================================================
+# ROUTAGE
 # ============================================================
 
 if st.session_state.page_choice == "Paludisme":
-    try:
-        import app_paludisme
-    except Exception as e:
-        st.error(f"❌ Erreur de chargement de l'application Paludisme")
-        st.code(f"Erreur : {str(e)}")
-        with st.expander("📋 Détails de l'erreur"):
-            import traceback
-            st.code(traceback.format_exc())
-        st.warning("Vérifiez que le fichier 'app_paludisme.py' existe et ne contient pas d'erreurs.")
-        st.session_state.page_choice = "Accueil"
-        if st.button("🏠 Retour à l'accueil"):
-            st.rerun()
+    load_app("app_paludisme.py")
     
 elif st.session_state.page_choice == "Rougeole":
-    try:
-        import app_rougeole
-    except Exception as e:
-        st.error(f"❌ Erreur de chargement de l'application Rougeole")
-        st.code(f"Erreur : {str(e)}")
-        with st.expander("📋 Détails de l'erreur"):
-            import traceback
-            st.code(traceback.format_exc())
-        st.warning("Vérifiez que le fichier 'app_rougeole.py' existe et ne contient pas d'erreurs.")
-        st.session_state.page_choice = "Accueil"
-        if st.button("🏠 Retour à l'accueil"):
-            st.rerun()
+    load_app("app_rougeole.py")
     
 elif st.session_state.page_choice == "Manuel":
-    try:
-        import app_manuel
-    except Exception as e:
-        st.error(f"❌ Erreur de chargement du Manuel")
-        st.code(f"Erreur : {str(e)}")
-        with st.expander("📋 Détails de l'erreur"):
-            import traceback
-            st.code(traceback.format_exc())
-        st.warning("Vérifiez que le fichier 'app_manuel.py' existe et ne contient pas d'erreurs.")
-        st.session_state.page_choice = "Accueil"
-        if st.button("🏠 Retour à l'accueil"):
-            st.rerun()
+    load_app("app_manuel.py")
 
 else:  # Page d'accueil
     
-    # ============================================================
-    # EN-TÊTE MSF
-    # ============================================================
     st.markdown("""
     <div class="header-banner">
         <div class="msf-logo">⚕️ MÉDECINS SANS FRONTIÈRES</div>
@@ -260,9 +253,6 @@ else:  # Page d'accueil
     </div>
     """, unsafe_allow_html=True)
     
-    # ============================================================
-    # INTRODUCTION
-    # ============================================================
     st.markdown("""
     <div style="text-align:center; margin:1.5rem 0;">
         <h2 style="color:#E4032E; font-size:1.8rem;">Choisissez votre module d'analyse</h2>
@@ -272,9 +262,6 @@ else:  # Page d'accueil
     </div>
     """, unsafe_allow_html=True)
     
-    # ============================================================
-    # CARTES DES APPLICATIONS
-    # ============================================================
     col1, col2 = st.columns(2)
     
     with col1:
@@ -328,9 +315,6 @@ else:  # Page d'accueil
             st.session_state.page_choice = "Rougeole"
             st.rerun()
     
-    # ============================================================
-    # SECTION DOCUMENTATION
-    # ============================================================
     st.markdown("""
     <div class="info-section">
         <h2>📚 Documentation et Ressources</h2>
@@ -375,9 +359,6 @@ else:  # Page d'accueil
             st.session_state.page_choice = "Manuel"
             st.rerun()
     
-    # ============================================================
-    # CARACTÉRISTIQUES TECHNIQUES
-    # ============================================================
     st.markdown("""
     <div style="text-align:center; margin:2.5rem 0 1.5rem 0;">
         <h2 style="color:#E4032E; font-size:1.8rem;">⚙️ Caractéristiques Techniques</h2>
@@ -425,9 +406,6 @@ else:  # Page d'accueil
         </div>
         """, unsafe_allow_html=True)
     
-    # ============================================================
-    # FOOTER MSF
-    # ============================================================
     st.markdown("""
     <div class="footer">
         <p style="font-size:1.2rem; font-weight:bold; color:#E4032E; margin-bottom:0.5rem;">
