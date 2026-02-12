@@ -1627,7 +1627,7 @@ else:
     st.info("ℹ️ Données de délai de notification non disponibles")
 
 # ============================================================
-# MODÉLISATION PRÉDICTIVE - VERSION FINALE AVEC CLÉS UNIQUES
+# MODÉLISATION PRÉDICTIVE - VERSION FINALE UNIQUE
 # ============================================================
 
 st.header("🔮 Modélisation Prédictive par Semaines Épidémiologiques")
@@ -1644,20 +1644,20 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-if 'prediction_lancee_rougeole' not in st.session_state:
-    st.session_state.prediction_lancee_rougeole = False
+if 'prediction_rougeole_lancee' not in st.session_state:
+    st.session_state.prediction_rougeole_lancee = False
 
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    if st.button("🚀 Lancer la Modélisation Prédictive", type="primary", use_container_width=True, key="btn_modelisation_rougeole"):
-        st.session_state.prediction_lancee_rougeole = True
+    if st.button("🚀 Lancer la Modélisation Prédictive", type="primary", use_container_width=True, key="btn_model_rougeole"):
+        st.session_state.prediction_rougeole_lancee = True
 
 with col2:
     if st.button("🔄 Réinitialiser", use_container_width=True, key="btn_reset_rougeole"):
-        st.session_state.prediction_lancee_rougeole = False
+        st.session_state.prediction_rougeole_lancee = False
 
-if not st.session_state.prediction_lancee_rougeole:
+if not st.session_state.prediction_rougeole_lancee:
     st.info("👆 Cliquez sur le bouton ci-dessus pour lancer la modélisation")
     st.stop()
 
@@ -1776,7 +1776,6 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
     
     nan_before = weekly_features[feature_cols].isna().sum()
     if nan_before.any():
-        st.warning(f"⚠️ NaN restants détectés : {nan_before[nan_before > 0].to_dict()}")
         for col in feature_cols:
             weekly_features[col] = weekly_features[col].fillna(0)
     
@@ -1839,7 +1838,6 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
         X_scaled = scaler.fit_transform(X)
     
     if np.isnan(X_scaled).any():
-        st.warning("⚠️ NaN détectés après normalisation. Remplissage avec 0...")
         X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
     
     X_train, X_test, y_train, y_test = train_test_split(
@@ -2184,7 +2182,7 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             file_name=f"predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True,
-            key="download_csv_predictions"
+            key="dl_pred_csv"
         )
     
     with col2:
@@ -2195,7 +2193,7 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             file_name=f"synthese_risque_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True,
-            key="download_csv_synthese"
+            key="dl_synth_csv"
         )
     
     with col3:
@@ -2213,7 +2211,7 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             file_name=f"rapport_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
-            key="download_excel_rapport"
+            key="dl_rapport_excel"
         )
     
     st.markdown("---")
