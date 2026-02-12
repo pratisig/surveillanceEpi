@@ -1627,7 +1627,7 @@ else:
     st.info("ℹ️ Données de délai de notification non disponibles")
 
 # ============================================================
-# PARTIE 5/6 - MODÉLISATION PRÉDICTIVE AVEC SYSTÈME HYBRIDE (CORRIGÉ)
+# MODÉLISATION PRÉDICTIVE - VERSION FINALE AVEC CLÉS UNIQUES
 # ============================================================
 
 st.header("🔮 Modélisation Prédictive par Semaines Épidémiologiques")
@@ -1644,517 +1644,20 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ========== CORRECTION : Supprimer st.rerun() ==========
-if 'prediction_lancee' not in st.session_state:
-    st.session_state.prediction_lancee = False
+if 'prediction_lancee_rougeole' not in st.session_state:
+    st.session_state.prediction_lancee_rougeole = False
 
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    # NOUVEAU : Simple changement d'état sans rerun
-    if st.button("🚀 Lancer la Modélisation Prédictive", type="primary", use_container_width=True):
-        st.session_state.prediction_lancee = True
-        # SUPPRIMÉ : st.rerun()
+    if st.button("🚀 Lancer la Modélisation Prédictive", type="primary", use_container_width=True, key="btn_modelisation_rougeole"):
+        st.session_state.prediction_lancee_rougeole = True
 
 with col2:
-    # NOUVEAU : Simple reset sans rerun
-    if st.button("🔄 Réinitialiser", use_container_width=True):
-        st.session_state.prediction_lancee = False
-        # SUPPRIMÉ : st.rerun()
+    if st.button("🔄 Réinitialiser", use_container_width=True, key="btn_reset_rougeole"):
+        st.session_state.prediction_lancee_rougeole = False
 
-# ========== Afficher message si pas encore lancé ==========
-if not st.session_state.prediction_lancee:
-    st.info("👆 Cliquez sur le bouton ci-dessus pour lancer la modélisation")
-    st.stop()
-
-if st.session_state.prediction_lancee:
-    
-    with st.spinner("🤖 Préparation des données et entraînement..."):
-        
-        weekly_features = df.groupby(["Aire_Sante", "Annee", "Semaine_Epi"]).agg(
-            Cas_Observes=("ID_Cas", "count"),
-            Non_Vaccines=("Statut_Vaccinal", lambda x: (x == "Non").mean() * 100),
-            Age_Moyen=("Age_Mois", "mean")
-        ).reset_index()
-        
-        weekly_features['Semaine_Label'] = (
-            weekly_features['Annee'].astype(str) + '-S' +
-            weekly_features['Semaine_Epi'].astype(str).str.zfill(2)
-        )
-        
-        weekly_features = weekly_features.merge(
-            sa_gdf_enrichi[[
-                "health_area", "Pop_Totale", "Pop_Enfants",
-                "Densite_Pop", "Densite_Enfants", "Urbanisation",
-                "Temperature_Moy", "Humidite_Moy", "Saison_Seche_Humidite",
-                "Taux_Vaccination"
-            ]],
-            left_on="Aire_Sante",
-            right_on="health_area",
-            how="left"
-        )
-        
-        # ========== NOUVEAU : Gestion robuste NaN dès le début ==========
-        # Remplir Age_Moyen avec médiane
-        weekly_features['Age_Moyen'] = weekly_features['Age_Moyen'].fillna(
-            weekly_features['Age_Moyen'].median()
-        )
-        
-        # Remplir Non_Vaccines avec moyenne
-        weekly_features['Non_Vaccines'] = weekly_features['Non_Vaccines'].fillna(
-            weekly_features['Non_Vaccines'].mean() if weekly_features['Non_Vaccines'].notna().any() else 50.0
-        )
-        
-        le_urban = LabelEncoder()
-        weekly_features["Urban_Encoded"] = le_urban.fit_transform(
-            weekly_features["Urbanisation"].fillna("Rural")
-        )
-        
-        # Créer un coefficient climatique composite si données disponibles
-        if donnees_dispo["Climat"]:
-            scaler_climat = MinMaxScaler()
-            climate_cols = ["Temperature_Moy", "Humidite_Moy", "Saison_Seche_Humidite"]
-            
-            # NOUVEAU : Remplir NaN climatiques avec moyennes
-            for col in climate_cols:
-                if col in weekly_features.columns:
-                    col_mean = weekly_features[col].mean()
-                    if pd.isna(col_mean):
-                        col_mean = 0
-                    weekly_features[col] = weekly_features[col].fillna(col_mean)
-            
-            # Normaliser
-            climate_data_to_scale = weekly_features[climate_cols].values
-            climate_scaled = scaler_climat.fit_transform(climate_data_to_scale)
-            
-            for idx, col in enumerate(climate_cols):
-                weekly_features[f"{col}_Norm"] = climate_scaled[:, idx]
-            
-            weekly_features["Coef_Climatique"] = (
-                weekly_features.get("Temperature_Moy_Norm", 0) * 0.4 +
-                weekly_features.get("Humidite_Moy_Norm", 0) * 0.4 +
-                weekly_features.get("Saison_Seche_Humidite_Norm", 0) * 0.2
-            )
-        
-        weekly_features = weekly_features.sort_values(['Aire_Sante', 'Annee', 'Semaine_Epi'])
-        
-        # Créer les lags
-        for lag in [1, 2, 3, 4]:
-            weekly_features[f'Cas_Lag_{lag}'] = (
-                weekly_features.groupby('Aire_Sante')['Cas_Observes'].shift(lag)
-            )
-        
-        # ========== NOUVEAU : Nettoyage robuste des valeurs numériques ==========
-        numeric_cols = weekly_features.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            # Remplacer inf par NaN
-            weekly_features[col] = weekly_features[col].replace([np.inf, -np.inf], np.nan)
-            
-            # Calculer la moyenne (ignorer NaN)
-            col_mean = weekly_features[col].mean()
-            
-            # Si pas de moyenne (tout est NaN), utiliser 0
-            if pd.isna(col_mean):
-                col_mean = 0
-            
-            # Remplir les NaN
-            weekly_features[col] = weekly_features[col].fillna(col_mean)
-        
-        st.subheader("📚 Entraînement du Modèle")
-        
-        # Construire la liste des features en fonction des données disponibles
-        feature_cols = [
-            "Cas_Observes", "Age_Moyen", "Semaine_Epi",
-            "Cas_Lag_1", "Cas_Lag_2", "Cas_Lag_3", "Cas_Lag_4"
-        ]
-        
-        # Mapping des groupes vers les colonnes individuelles
-        feature_groups = {
-            "Historique_Cas": ["Cas_Lag_1", "Cas_Lag_2", "Cas_Lag_3", "Cas_Lag_4"],
-            "Vaccination": [],
-            "Demographie": [],
-            "Urbanisation": [],
-            "Climat": []
-        }
-        
-        if donnees_dispo["Population"]:
-            feature_cols.extend(["Pop_Totale", "Pop_Enfants", "Densite_Pop", "Densite_Enfants"])
-            feature_groups["Demographie"] = ["Pop_Totale", "Pop_Enfants", "Densite_Pop", "Densite_Enfants"]
-            st.info("✅ Données démographiques intégrées au modèle")
-        
-        if donnees_dispo["Urbanisation"]:
-            feature_cols.append("Urban_Encoded")
-            feature_groups["Urbanisation"] = ["Urban_Encoded"]
-            st.info("✅ Classification urbaine intégrée au modèle")
-        
-        if donnees_dispo["Climat"]:
-            feature_cols.append("Coef_Climatique")
-            feature_groups["Climat"] = ["Coef_Climatique"]
-            st.info("✅ Coefficient climatique composite intégré au modèle")
-        
-        if donnees_dispo["Vaccination"]:
-            feature_cols.extend(["Taux_Vaccination", "Non_Vaccines"])
-            feature_groups["Vaccination"] = ["Taux_Vaccination", "Non_Vaccines"]
-            st.info("✅ Données vaccinales intégrées au modèle")
-        elif "Non_Vaccines" in weekly_features.columns:
-            feature_cols.append("Non_Vaccines")
-            feature_groups["Vaccination"] = ["Non_Vaccines"]
-        
-        st.markdown(f"**Variables utilisées :** {len(feature_cols)} features")
-        
-        # ========== NOUVEAU : Vérification finale des NaN avant dropna ==========
-        nan_before = weekly_features[feature_cols].isna().sum()
-        if nan_before.any():
-            st.warning(f"⚠️ NaN restants détectés : {nan_before[nan_before > 0].to_dict()}")
-            # Forcer le remplissage avec 0
-            for col in feature_cols:
-                weekly_features[col] = weekly_features[col].fillna(0)
-        
-        weekly_features_clean = weekly_features.dropna(subset=feature_cols)
-        
-        if len(weekly_features_clean) < 20:
-            st.warning("⚠️ Données insuffisantes (minimum 20 observations requises)")
-            st.stop()
-        
-        X = weekly_features_clean[feature_cols].copy()
-        y = weekly_features_clean["Cas_Observes"].copy()
-        
-        # ========== NOUVEAU : Vérification NaN dans X et y ==========
-        if X.isna().any().any():
-            st.error("❌ NaN détectés dans X après nettoyage")
-            st.dataframe(X.isna().sum())
-            X = X.fillna(0)
-        
-        if y.isna().any():
-            st.error("❌ NaN détectés dans y après nettoyage")
-            y = y.fillna(0)
-        
-        # ========== APPLICATION DES POIDS (MODE MANUEL) ==========
-        if mode_importance == "👨‍⚕️ Manuel (Expert)":
-            st.markdown('<div class="weight-box">', unsafe_allow_html=True)
-            st.markdown("**⚖️ Application des poids manuels aux variables**")
-            
-            # Créer un dictionnaire de mapping colonne → poids
-            column_weights = {}
-            
-            for group_name, weight in poids_normalises.items():
-                if group_name in feature_groups:
-                    cols_in_group = feature_groups[group_name]
-                    if len(cols_in_group) > 0:
-                        weight_per_col = weight / len(cols_in_group)
-                        for col in cols_in_group:
-                            if col in feature_cols:
-                                column_weights[col] = weight_per_col
-            
-            # Ajouter des poids par défaut pour les colonnes non groupées
-            for col in feature_cols:
-                if col not in column_weights:
-                    column_weights[col] = 0.01
-            
-            # Appliquer les poids aux features
-            X_weighted = X.copy()
-            for col in feature_cols:
-                if col in column_weights:
-                    X_weighted[col] = X_weighted[col] * column_weights[col]
-            
-            # Afficher le détail des poids appliqués
-            weights_df = pd.DataFrame({
-                "Variable": list(column_weights.keys()),
-                "Poids": [f"{v*100:.2f}%" for v in column_weights.values()]
-            })
-            
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.dataframe(weights_df, use_container_width=True, hide_index=True)
-            with col2:
-                st.metric("Total des poids", "100.00%")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Utiliser X_weighted pour l'entraînement
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_weighted)
-        else:
-            # Mode automatique : pas de pondération manuelle
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-        
-        # ========== NOUVEAU : Vérifier NaN après normalisation ==========
-        if np.isnan(X_scaled).any():
-            st.warning("⚠️ NaN détectés après normalisation. Remplissage avec 0...")
-            X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42
-        )
-        
-        if modele_choisi == "GradientBoosting (Recommandé)":
-            model = GradientBoostingRegressor(
-                n_estimators=300,
-                learning_rate=0.05,
-                max_depth=5,
-                min_samples_split=4,
-                random_state=42
-            )
-        elif modele_choisi == "RandomForest":
-            model = RandomForestRegressor(
-                n_estimators=200,
-                max_depth=10,
-                min_samples_split=4,
-                random_state=42
-            )
-        elif modele_choisi == "Ridge Regression":
-            model = Ridge(alpha=1.0, random_state=42)
-        elif modele_choisi == "Lasso Regression":
-            model = Lasso(alpha=0.1, random_state=42)
-        elif modele_choisi == "Decision Tree":
-            model = DecisionTreeRegressor(
-                max_depth=8,
-                min_samples_split=4,
-                random_state=42
-            )
-        
-        model.fit(X_train, y_train)
-        
-        score_test = model.score(X_test, y_test)
-        cv_scores = cross_val_score(model, X_scaled, y, cv=5, scoring='r2')
-        cv_mean = cv_scores.mean()
-        cv_std = cv_scores.std()
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📊 R² Test", f"{score_test:.3f}")
-        with col2:
-            st.metric("🎯 R² CV (5-fold)", f"{cv_mean:.3f}")
-        with col3:
-            st.metric("📏 Écart-type CV", f"±{cv_std:.3f}")
-        
-        if cv_mean > 0.7:
-            st.success(f"✅ Modèle performant ({modele_choisi})")
-        elif cv_mean > 0.5:
-            st.warning(f"⚠️ Modèle acceptable ({modele_choisi})")
-        else:
-            st.error(f"❌ Modèle peu performant - envisagez un autre algorithme")
-        
-        # Afficher l'importance des variables (automatique OU ajustée)
-        if hasattr(model, 'feature_importances_'):
-            feature_importance = pd.DataFrame({
-                "Variable": feature_cols,
-                "Importance": model.feature_importances_
-            }).sort_values("Importance", ascending=False)
-            
-            with st.expander("📊 Importance des variables", expanded=True):
-                if mode_importance == "👨‍⚕️ Manuel (Expert)":
-                    st.info("ℹ️ Ces importances reflètent l'influence des variables **après application des poids manuels**")
-                else:
-                    st.info("ℹ️ Ces importances sont **calculées automatiquement** par le modèle ML")
-                
-                fig_imp = px.bar(
-                    feature_importance.head(10),
-                    x="Importance",
-                    y="Variable",
-                    orientation="h",
-                    title="Top 10 variables les plus importantes",
-                    color="Importance",
-                    color_continuous_scale="Viridis"
-                )
-                st.plotly_chart(fig_imp, use_container_width=True)
-        
-        st.subheader(f"📅 Génération des Prédictions - {n_weeks_pred} Semaines")
-        
-        future_climate = None
-        if donnees_dispo["Climat"]:
-            future_start = end_date + timedelta(days=1)
-            future_end = end_date + timedelta(days=n_weeks_pred * 7)
-            
-            with st.spinner("🌡️ Chargement prévisions climatiques..."):
-                try:
-                    future_climate = fetch_climate_nasa_power(sa_gdf, future_start, future_end)
-                    st.info("✅ Prévisions climatiques intégrées aux prédictions")
-                except:
-                    st.warning("⚠️ Prévisions climatiques indisponibles - utilisation valeurs moyennes")
-        
-        future_predictions = []
-        
-        for aire in weekly_features["Aire_Sante"].unique():
-            aire_data = weekly_features[weekly_features["Aire_Sante"] == aire].sort_values(['Annee', 'Semaine_Epi'])
-            
-            if aire_data.empty:
-                continue
-            
-            last_obs = aire_data.iloc[-1]
-            
-            last_4_weeks = aire_data.tail(4)['Cas_Observes'].values
-            if len(last_4_weeks) < 4:
-                last_4_weeks = np.pad(last_4_weeks, (4-len(last_4_weeks), 0), 'edge')
-            
-            for i in range(1, n_weeks_pred + 1):
-                nouvelle_semaine_epi = (derniere_semaine_epi + i - 1) % 52 + 1
-                nouvelle_annee = derniere_annee + ((derniere_semaine_epi + i - 1) // 52)
-                
-                future_row = {
-                    "Aire_Sante": aire,
-                    "Annee": nouvelle_annee,
-                    "Semaine_Epi": nouvelle_semaine_epi,
-                    "Semaine_Label": f"{nouvelle_annee}-S{str(nouvelle_semaine_epi).zfill(2)}",
-                    "Age_Moyen": last_obs["Age_Moyen"] if pd.notna(last_obs["Age_Moyen"]) else 0
-                }
-                
-                if donnees_dispo["Population"]:
-                    future_row.update({
-                        "Pop_Totale": last_obs["Pop_Totale"] if pd.notna(last_obs["Pop_Totale"]) else 0,
-                        "Pop_Enfants": last_obs["Pop_Enfants"] if pd.notna(last_obs["Pop_Enfants"]) else 0,
-                        "Densite_Pop": last_obs["Densite_Pop"] if pd.notna(last_obs["Densite_Pop"]) else 0,
-                        "Densite_Enfants": last_obs["Densite_Enfants"] if pd.notna(last_obs["Densite_Enfants"]) else 0
-                    })
-                
-                if donnees_dispo["Urbanisation"]:
-                    future_row["Urban_Encoded"] = last_obs["Urban_Encoded"] if pd.notna(last_obs["Urban_Encoded"]) else 0
-                
-                if donnees_dispo["Climat"]:
-                    if future_climate is not None:
-                        climate_aire = future_climate[future_climate["health_area"] == aire]
-                        if not climate_aire.empty:
-                            # ========== NOUVEAU : Protection contre NaN climatiques ==========
-                            temp_val = climate_aire.iloc[0].get("Temperature_Moy", 0)
-                            hum_val = climate_aire.iloc[0].get("Humidite_Moy", 0)
-                            saison_val = climate_aire.iloc[0].get("Saison_Seche_Humidite", 0)
-                            
-                            temp_val = 0 if pd.isna(temp_val) else temp_val
-                            hum_val = 0 if pd.isna(hum_val) else hum_val
-                            saison_val = 0 if pd.isna(saison_val) else saison_val
-                            
-                            temp_norm = scaler_climat.transform([[temp_val, 0, 0]])[0][0]
-                            hum_norm = scaler_climat.transform([[0, hum_val, 0]])[0][1]
-                            saison_norm = scaler_climat.transform([[0, 0, saison_val]])[0][2]
-                            
-                            future_row["Coef_Climatique"] = temp_norm * 0.4 + hum_norm * 0.4 + saison_norm * 0.2
-                        else:
-                            future_row["Coef_Climatique"] = last_obs.get("Coef_Climatique", 0)
-                    else:
-                        future_row["Coef_Climatique"] = last_obs.get("Coef_Climatique", 0)
-                
-                if donnees_dispo["Vaccination"]:
-                    future_row["Taux_Vaccination"] = last_obs["Taux_Vaccination"] if pd.notna(last_obs["Taux_Vaccination"]) else 80
-                    future_row["Non_Vaccines"] = last_obs["Non_Vaccines"] if pd.notna(last_obs["Non_Vaccines"]) else 20
-                elif "Non_Vaccines" in last_obs:
-                    future_row["Non_Vaccines"] = last_obs["Non_Vaccines"] if pd.notna(last_obs["Non_Vaccines"]) else 20
-                
-                if i == 1:
-                    future_row["Cas_Observes"] = last_obs["Cas_Observes"]
-                    future_row["Cas_Lag_1"] = last_4_weeks[-1]
-                    future_row["Cas_Lag_2"] = last_4_weeks[-2] if len(last_4_weeks) >= 2 else last_4_weeks[-1]
-                    future_row["Cas_Lag_3"] = last_4_weeks[-3] if len(last_4_weeks) >= 3 else last_4_weeks[-1]
-                    future_row["Cas_Lag_4"] = last_4_weeks[-4] if len(last_4_weeks) >= 4 else last_4_weeks[-1]
-                else:
-                    prev_predictions = [
-                        p["Predicted_Cases"] for p in future_predictions
-                        if p["Aire_Sante"] == aire
-                    ]
-                    future_row["Cas_Observes"] = prev_predictions[-1] if prev_predictions else last_obs["Cas_Observes"]
-                    future_row["Cas_Lag_1"] = prev_predictions[-1] if len(prev_predictions) >= 1 else last_4_weeks[-1]
-                    future_row["Cas_Lag_2"] = prev_predictions[-2] if len(prev_predictions) >= 2 else last_4_weeks[-2]
-                    future_row["Cas_Lag_3"] = prev_predictions[-3] if len(prev_predictions) >= 3 else last_4_weeks[-3]
-                    future_row["Cas_Lag_4"] = prev_predictions[-4] if len(prev_predictions) >= 4 else last_4_weeks[-4]
-                
-                # ========== NOUVEAU : Créer X_future avec protection NaN ==========
-                X_future_values = []
-                for col in feature_cols:
-                    val = future_row.get(col, 0)
-                    if pd.isna(val):
-                        val = 0
-                    X_future_values.append(val)
-                
-                X_future = np.array([X_future_values])
-                
-                # Appliquer les mêmes poids si mode manuel
-                if mode_importance == "👨‍⚕️ Manuel (Expert)":
-                    for idx, col in enumerate(feature_cols):
-                        if col in column_weights:
-                            X_future[0, idx] = X_future[0, idx] * column_weights[col]
-                
-                # ========== NOUVEAU : Vérifier NaN avant normalisation ==========
-                if np.isnan(X_future).any():
-                    X_future = np.nan_to_num(X_future, nan=0.0)
-                
-                X_future_scaled = scaler.transform(X_future)
-                
-                # ========== NOUVEAU : Vérifier NaN après normalisation ==========
-                if np.isnan(X_future_scaled).any():
-                    X_future_scaled = np.nan_to_num(X_future_scaled, nan=0.0)
-                
-                predicted_cases = max(0, model.predict(X_future_scaled)[0])
-                
-                if cv_std > 0:
-                    noise = np.random.normal(0, predicted_cases * cv_std * 0.1)
-                    predicted_cases = max(0, predicted_cases + noise)
-                
-                future_row["Predicted_Cases"] = predicted_cases
-                future_predictions.append(future_row)
-        
-        future_df = pd.DataFrame(future_predictions)
-        future_df['Predicted_Cases'] = future_df['Predicted_Cases'].round(0).astype(int)
-        
-        st.success(f"✓ {len(future_df)} prédictions générées ({len(future_df['Aire_Sante'].unique())} aires × {n_weeks_pred} semaines)")
-        st.success(f"✓ {len(future_df)} prédictions générées ({len(future_df['Aire_Sante'].unique())} aires × {n_weeks_pred} semaines)")
-        
-        moyenne_historique = weekly_features.groupby("Aire_Sante")["Cas_Observes"].mean().reset_index()
-        moyenne_historique.columns = ["Aire_Sante", "Moyenne_Historique"]
-        
-        risk_df = future_df.groupby("Aire_Sante").agg(
-            Cas_Predits_Total=("Predicted_Cases", "sum"),
-            Cas_Predits_Max=("Predicted_Cases", "max"),
-            Cas_Predits_Moyen=("Predicted_Cases", "mean"),
-            Semaine_Pic=("Predicted_Cases", lambda x: future_df.loc[x.idxmax(), "Semaine_Label"] if len(x) > 0 else "N/A")
-        ).reset_index()
-        
-        risk_df = risk_df.merge(moyenne_historique, on="Aire_Sante", how="left")
-        
-        risk_df["Variation_Pct"] = (
-            (risk_df["Cas_Predits_Moyen"] - risk_df["Moyenne_Historique"]) /
-            risk_df["Moyenne_Historique"].replace(0, 1)
-        ) * 100
-        
-        risk_df["Categorie_Variation"] = pd.cut(
-            risk_df["Variation_Pct"],
-            bins=[-np.inf, -seuil_baisse, -10, 10, seuil_hausse, np.inf],
-            labels=["Forte baisse", "Baisse modérée", "Stable", "Hausse modérée", "Forte hausse"]
-        )
-        
-        risk_df = risk_df.sort_values("Variation_Pct", ascending=False)
-
-# ============================================================
-# MODÉLISATION PRÉDICTIVE
-# ============================================================
-
-st.header("🔮 Modélisation Prédictive par Semaines Épidémiologiques")
-
-st.markdown(f"""
-<div class="info-box">
-<b>Configuration de la prédiction :</b><br>
-- Dernière semaine de données : <b>S{derniere_semaine_epi} ({derniere_annee})</b><br>
-- Période de prédiction : <b>{pred_mois} mois ({n_weeks_pred} semaines)</b><br>
-- Semaines prédites : <b>S{derniere_semaine_epi+1} à S{min(derniere_semaine_epi+n_weeks_pred, 52)}</b><br>
-- Modèle sélectionné : <b>{modele_choisi}</b><br>
-- Mode importance : <b>{mode_importance}</b><br>
-- Seuils configurés : Baisse ≥{seuil_baisse}%, Hausse ≥{seuil_hausse}%
-</div>
-""", unsafe_allow_html=True)
-
-if 'prediction_lancee' not in st.session_state:
-    st.session_state.prediction_lancee = False
-
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    if st.button("🚀 Lancer la Modélisation Prédictive", type="primary", use_container_width=True):
-        st.session_state.prediction_lancee = True
-
-with col2:
-    if st.button("🔄 Réinitialiser", use_container_width=True):
-        st.session_state.prediction_lancee = False
-
-if not st.session_state.prediction_lancee:
+if not st.session_state.prediction_lancee_rougeole:
     st.info("👆 Cliquez sur le bouton ci-dessus pour lancer la modélisation")
     st.stop()
 
@@ -2680,7 +2183,8 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             data=csv_predictions,
             file_name=f"predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            use_container_width=True
+            use_container_width=True,
+            key="download_csv_predictions"
         )
     
     with col2:
@@ -2690,7 +2194,8 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             data=csv_synthese,
             file_name=f"synthese_risque_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            use_container_width=True
+            use_container_width=True,
+            key="download_csv_synthese"
         )
     
     with col3:
@@ -2707,7 +2212,8 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             data=output.getvalue(),
             file_name=f"rapport_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            use_container_width=True,
+            key="download_excel_rapport"
         )
     
     st.markdown("---")
@@ -2715,4 +2221,3 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
     st.info("💡 Ajustez les paramètres dans la sidebar pour relancer une nouvelle prédiction")
     
     st.stop()
-
