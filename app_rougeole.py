@@ -2429,7 +2429,7 @@ if st.session_state.prediction_lancee:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-        
+        st.stop()  
         st.header("💡 Recommandations Opérationnelles")
         
         aires_critiques_hausse = risk_df[risk_df["Variation_Pct"] >= seuil_hausse]["Aire_Sante"].tolist()
