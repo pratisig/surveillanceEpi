@@ -1644,20 +1644,28 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ========== CORRECTION : Supprimer st.rerun() ==========
 if 'prediction_lancee' not in st.session_state:
     st.session_state.prediction_lancee = False
 
 col1, col2 = st.columns([3, 1])
 
 with col1:
+    # NOUVEAU : Simple changement d'état sans rerun
     if st.button("🚀 Lancer la Modélisation Prédictive", type="primary", use_container_width=True):
         st.session_state.prediction_lancee = True
-        st.rerun()
+        # SUPPRIMÉ : st.rerun()
 
 with col2:
+    # NOUVEAU : Simple reset sans rerun
     if st.button("🔄 Réinitialiser", use_container_width=True):
         st.session_state.prediction_lancee = False
-        st.rerun()
+        # SUPPRIMÉ : st.rerun()
+
+# ========== Afficher message si pas encore lancé ==========
+if not st.session_state.prediction_lancee:
+    st.info("👆 Cliquez sur le bouton ci-dessus pour lancer la modélisation")
+    st.stop()
 
 if st.session_state.prediction_lancee:
     
