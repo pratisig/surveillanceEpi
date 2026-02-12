@@ -1627,7 +1627,7 @@ else:
     st.info("ℹ️ Données de délai de notification non disponibles")
 
 # ============================================================
-# PARTIE 5/6 - MODÉLISATION PRÉDICTIVE AVEC SYSTÈME HYBRIDE
+# PARTIE 5/6 - MODÉLISATION PRÉDICTIVE AVEC SYSTÈME HYBRIDE (CORRIGÉ)
 # ============================================================
 
 st.header("🔮 Modélisation Prédictive par Semaines Épidémiologiques")
@@ -1686,6 +1686,17 @@ if st.session_state.prediction_lancee:
             how="left"
         )
         
+        # ========== NOUVEAU : Gestion robuste NaN dès le début ==========
+        # Remplir Age_Moyen avec médiane
+        weekly_features['Age_Moyen'] = weekly_features['Age_Moyen'].fillna(
+            weekly_features['Age_Moyen'].median()
+        )
+        
+        # Remplir Non_Vaccines avec moyenne
+        weekly_features['Non_Vaccines'] = weekly_features['Non_Vaccines'].fillna(
+            weekly_features['Non_Vaccines'].mean() if weekly_features['Non_Vaccines'].notna().any() else 50.0
+        )
+        
         le_urban = LabelEncoder()
         weekly_features["Urban_Encoded"] = le_urban.fit_transform(
             weekly_features["Urbanisation"].fillna("Rural")
@@ -1696,11 +1707,20 @@ if st.session_state.prediction_lancee:
             scaler_climat = MinMaxScaler()
             climate_cols = ["Temperature_Moy", "Humidite_Moy", "Saison_Seche_Humidite"]
             
+            # NOUVEAU : Remplir NaN climatiques avec moyennes
             for col in climate_cols:
                 if col in weekly_features.columns:
-                    weekly_features[f"{col}_Norm"] = scaler_climat.fit_transform(
-                        weekly_features[[col]].fillna(weekly_features[col].mean())
-                    )
+                    col_mean = weekly_features[col].mean()
+                    if pd.isna(col_mean):
+                        col_mean = 0
+                    weekly_features[col] = weekly_features[col].fillna(col_mean)
+            
+            # Normaliser
+            climate_data_to_scale = weekly_features[climate_cols].values
+            climate_scaled = scaler_climat.fit_transform(climate_data_to_scale)
+            
+            for idx, col in enumerate(climate_cols):
+                weekly_features[f"{col}_Norm"] = climate_scaled[:, idx]
             
             weekly_features["Coef_Climatique"] = (
                 weekly_features.get("Temperature_Moy_Norm", 0) * 0.4 +
@@ -1710,16 +1730,27 @@ if st.session_state.prediction_lancee:
         
         weekly_features = weekly_features.sort_values(['Aire_Sante', 'Annee', 'Semaine_Epi'])
         
+        # Créer les lags
         for lag in [1, 2, 3, 4]:
             weekly_features[f'Cas_Lag_{lag}'] = (
                 weekly_features.groupby('Aire_Sante')['Cas_Observes'].shift(lag)
             )
         
+        # ========== NOUVEAU : Nettoyage robuste des valeurs numériques ==========
         numeric_cols = weekly_features.select_dtypes(include=[np.number]).columns
         for col in numeric_cols:
-            weekly_features[col] = weekly_features[col].replace([np.inf, -np.inf], 0)
-            mean_val = weekly_features[col].mean()
-            weekly_features[col] = weekly_features[col].fillna(mean_val if pd.notna(mean_val) else 0)
+            # Remplacer inf par NaN
+            weekly_features[col] = weekly_features[col].replace([np.inf, -np.inf], np.nan)
+            
+            # Calculer la moyenne (ignorer NaN)
+            col_mean = weekly_features[col].mean()
+            
+            # Si pas de moyenne (tout est NaN), utiliser 0
+            if pd.isna(col_mean):
+                col_mean = 0
+            
+            # Remplir les NaN
+            weekly_features[col] = weekly_features[col].fillna(col_mean)
         
         st.subheader("📚 Entraînement du Modèle")
         
@@ -1763,6 +1794,14 @@ if st.session_state.prediction_lancee:
         
         st.markdown(f"**Variables utilisées :** {len(feature_cols)} features")
         
+        # ========== NOUVEAU : Vérification finale des NaN avant dropna ==========
+        nan_before = weekly_features[feature_cols].isna().sum()
+        if nan_before.any():
+            st.warning(f"⚠️ NaN restants détectés : {nan_before[nan_before > 0].to_dict()}")
+            # Forcer le remplissage avec 0
+            for col in feature_cols:
+                weekly_features[col] = weekly_features[col].fillna(0)
+        
         weekly_features_clean = weekly_features.dropna(subset=feature_cols)
         
         if len(weekly_features_clean) < 20:
@@ -1770,7 +1809,17 @@ if st.session_state.prediction_lancee:
             st.stop()
         
         X = weekly_features_clean[feature_cols].copy()
-        y = weekly_features_clean["Cas_Observes"]
+        y = weekly_features_clean["Cas_Observes"].copy()
+        
+        # ========== NOUVEAU : Vérification NaN dans X et y ==========
+        if X.isna().any().any():
+            st.error("❌ NaN détectés dans X après nettoyage")
+            st.dataframe(X.isna().sum())
+            X = X.fillna(0)
+        
+        if y.isna().any():
+            st.error("❌ NaN détectés dans y après nettoyage")
+            y = y.fillna(0)
         
         # ========== APPLICATION DES POIDS (MODE MANUEL) ==========
         if mode_importance == "👨‍⚕️ Manuel (Expert)":
@@ -1821,6 +1870,11 @@ if st.session_state.prediction_lancee:
             # Mode automatique : pas de pondération manuelle
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X)
+        
+        # ========== NOUVEAU : Vérifier NaN après normalisation ==========
+        if np.isnan(X_scaled).any():
+            st.warning("⚠️ NaN détectés après normalisation. Remplissage avec 0...")
+            X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
         
         X_train, X_test, y_train, y_test = train_test_split(
             X_scaled, y, test_size=0.2, random_state=42
@@ -1935,27 +1989,36 @@ if st.session_state.prediction_lancee:
                     "Annee": nouvelle_annee,
                     "Semaine_Epi": nouvelle_semaine_epi,
                     "Semaine_Label": f"{nouvelle_annee}-S{str(nouvelle_semaine_epi).zfill(2)}",
-                    "Age_Moyen": last_obs["Age_Moyen"]
+                    "Age_Moyen": last_obs["Age_Moyen"] if pd.notna(last_obs["Age_Moyen"]) else 0
                 }
                 
                 if donnees_dispo["Population"]:
                     future_row.update({
-                        "Pop_Totale": last_obs["Pop_Totale"],
-                        "Pop_Enfants": last_obs["Pop_Enfants"],
-                        "Densite_Pop": last_obs["Densite_Pop"],
-                        "Densite_Enfants": last_obs["Densite_Enfants"]
+                        "Pop_Totale": last_obs["Pop_Totale"] if pd.notna(last_obs["Pop_Totale"]) else 0,
+                        "Pop_Enfants": last_obs["Pop_Enfants"] if pd.notna(last_obs["Pop_Enfants"]) else 0,
+                        "Densite_Pop": last_obs["Densite_Pop"] if pd.notna(last_obs["Densite_Pop"]) else 0,
+                        "Densite_Enfants": last_obs["Densite_Enfants"] if pd.notna(last_obs["Densite_Enfants"]) else 0
                     })
                 
                 if donnees_dispo["Urbanisation"]:
-                    future_row["Urban_Encoded"] = last_obs["Urban_Encoded"]
+                    future_row["Urban_Encoded"] = last_obs["Urban_Encoded"] if pd.notna(last_obs["Urban_Encoded"]) else 0
                 
                 if donnees_dispo["Climat"]:
                     if future_climate is not None:
                         climate_aire = future_climate[future_climate["health_area"] == aire]
                         if not climate_aire.empty:
-                            temp_norm = scaler_climat.transform([[climate_aire.iloc[0]["Temperature_Moy"]]])[0][0]
-                            hum_norm = scaler_climat.transform([[climate_aire.iloc[0]["Humidite_Moy"]]])[0][0]
-                            saison_norm = scaler_climat.transform([[climate_aire.iloc[0]["Saison_Seche_Humidite"]]])[0][0]
+                            # ========== NOUVEAU : Protection contre NaN climatiques ==========
+                            temp_val = climate_aire.iloc[0].get("Temperature_Moy", 0)
+                            hum_val = climate_aire.iloc[0].get("Humidite_Moy", 0)
+                            saison_val = climate_aire.iloc[0].get("Saison_Seche_Humidite", 0)
+                            
+                            temp_val = 0 if pd.isna(temp_val) else temp_val
+                            hum_val = 0 if pd.isna(hum_val) else hum_val
+                            saison_val = 0 if pd.isna(saison_val) else saison_val
+                            
+                            temp_norm = scaler_climat.transform([[temp_val, 0, 0]])[0][0]
+                            hum_norm = scaler_climat.transform([[0, hum_val, 0]])[0][1]
+                            saison_norm = scaler_climat.transform([[0, 0, saison_val]])[0][2]
                             
                             future_row["Coef_Climatique"] = temp_norm * 0.4 + hum_norm * 0.4 + saison_norm * 0.2
                         else:
@@ -1964,10 +2027,10 @@ if st.session_state.prediction_lancee:
                         future_row["Coef_Climatique"] = last_obs.get("Coef_Climatique", 0)
                 
                 if donnees_dispo["Vaccination"]:
-                    future_row["Taux_Vaccination"] = last_obs["Taux_Vaccination"]
-                    future_row["Non_Vaccines"] = last_obs["Non_Vaccines"]
+                    future_row["Taux_Vaccination"] = last_obs["Taux_Vaccination"] if pd.notna(last_obs["Taux_Vaccination"]) else 80
+                    future_row["Non_Vaccines"] = last_obs["Non_Vaccines"] if pd.notna(last_obs["Non_Vaccines"]) else 20
                 elif "Non_Vaccines" in last_obs:
-                    future_row["Non_Vaccines"] = last_obs["Non_Vaccines"]
+                    future_row["Non_Vaccines"] = last_obs["Non_Vaccines"] if pd.notna(last_obs["Non_Vaccines"]) else 20
                 
                 if i == 1:
                     future_row["Cas_Observes"] = last_obs["Cas_Observes"]
@@ -1986,7 +2049,15 @@ if st.session_state.prediction_lancee:
                     future_row["Cas_Lag_3"] = prev_predictions[-3] if len(prev_predictions) >= 3 else last_4_weeks[-3]
                     future_row["Cas_Lag_4"] = prev_predictions[-4] if len(prev_predictions) >= 4 else last_4_weeks[-4]
                 
-                X_future = np.array([[future_row[col] for col in feature_cols]])
+                # ========== NOUVEAU : Créer X_future avec protection NaN ==========
+                X_future_values = []
+                for col in feature_cols:
+                    val = future_row.get(col, 0)
+                    if pd.isna(val):
+                        val = 0
+                    X_future_values.append(val)
+                
+                X_future = np.array([X_future_values])
                 
                 # Appliquer les mêmes poids si mode manuel
                 if mode_importance == "👨‍⚕️ Manuel (Expert)":
@@ -1994,7 +2065,15 @@ if st.session_state.prediction_lancee:
                         if col in column_weights:
                             X_future[0, idx] = X_future[0, idx] * column_weights[col]
                 
+                # ========== NOUVEAU : Vérifier NaN avant normalisation ==========
+                if np.isnan(X_future).any():
+                    X_future = np.nan_to_num(X_future, nan=0.0)
+                
                 X_future_scaled = scaler.transform(X_future)
+                
+                # ========== NOUVEAU : Vérifier NaN après normalisation ==========
+                if np.isnan(X_future_scaled).any():
+                    X_future_scaled = np.nan_to_num(X_future_scaled, nan=0.0)
                 
                 predicted_cases = max(0, model.predict(X_future_scaled)[0])
                 
