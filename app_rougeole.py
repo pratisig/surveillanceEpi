@@ -2093,7 +2093,9 @@ if st.session_state.prediction_lancee:
                 future_predictions.append(future_row)
         
         future_df = pd.DataFrame(future_predictions)
+        future_df['Predicted_Cases'] = future_df['Predicted_Cases'].round(0).astype(int)
         
+        st.success(f"✓ {len(future_df)} prédictions générées ({len(future_df['Aire_Sante'].unique())} aires × {n_weeks_pred} semaines)")
         st.success(f"✓ {len(future_df)} prédictions générées ({len(future_df['Aire_Sante'].unique())} aires × {n_weeks_pred} semaines)")
         
         moyenne_historique = weekly_features.groupby("Aire_Sante")["Cas_Observes"].mean().reset_index()
