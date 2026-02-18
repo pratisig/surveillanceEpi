@@ -2014,7 +2014,7 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             )
             st.plotly_chart(fig_imp, use_container_width=True)
     
-    st.subheader(f"📅 Génération des Prédictions
+    st.subheader(f"📅 Génération des Prédictions - {n_weeks_pred} Semaines")
     
     moyenne_historique = weekly_features.groupby("Aire_Sante")["Cas_Observes"].mean().reset_index()
     moyenne_historique.columns = ["Aire_Sante", "Moyenne_Historique"]
