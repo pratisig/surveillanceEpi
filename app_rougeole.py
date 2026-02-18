@@ -2317,17 +2317,78 @@ heatmap_data = future_df.pivot_table(
 
 heatmap_data = heatmap_data.round(0).astype(int)
 
-fig_heatmap = px.imshow(
-    heatmap_data,
-    labels=dict(x="Semaine", y="Aire de Santé", color="Cas prédits"),
+# ============================================================
+# CORRECTION : Heatmap style damier avec cellules lisibles
+# ============================================================
+
+fig_heatmap = go.Figure(data=go.Heatmap(
+    z=heatmap_data.values,
+    x=heatmap_data.columns,
+    y=heatmap_data.index,
+    colorscale='Reds',
+    showscale=True,
+    colorbar=dict(
+        title="Cas<br>prédits",
+        titleside="right",
+        tickmode="linear",
+        tick0=0,
+        dtick=max(1, heatmap_data.values.max() // 10)
+    ),
+    hovertemplate='<b>%{y}</b><br>Semaine: %{x}<br>Cas prédits: %{z}<extra></extra>',
+    text=heatmap_data.values,
+    texttemplate='%{text}',
+    textfont=dict(
+        size=10,
+        color='white'
+    ),
+    xgap=2,  # Espacement horizontal entre cellules
+    ygap=2   # Espacement vertical entre cellules
+))
+
+fig_heatmap.update_layout(
     title=f"Prédictions par Aire et par Semaine ({n_weeks_pred} semaines)",
-    color_continuous_scale='Reds',
-    aspect='auto'
+    xaxis=dict(
+        title="Semaine épidémiologique",
+        tickangle=-45,
+        tickfont=dict(size=10),
+        side='bottom',
+        showgrid=False
+    ),
+    yaxis=dict(
+        title="Aire de santé",
+        tickfont=dict(size=9),
+        showgrid=False
+    ),
+    height=max(400, len(heatmap_data) * 25),  # Hauteur adaptative
+    width=None,
+    plot_bgcolor='#f0f0f0',
+    paper_bgcolor='white',
+    margin=dict(l=150, r=50, t=80, b=100)
 )
 
-fig_heatmap.update_xaxes(side="bottom")
-
 st.plotly_chart(fig_heatmap, use_container_width=True)
+
+# Ajouter des statistiques sous la heatmap
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    total_cas = heatmap_data.values.sum()
+    st.metric("Total cas prédits", f"{int(total_cas):,}")
+
+with col2:
+    semaine_max = heatmap_data.sum(axis=0).idxmax()
+    cas_semaine_max = int(heatmap_data.sum(axis=0).max())
+    st.metric("Semaine pic", semaine_max, f"{cas_semaine_max} cas")
+
+with col3:
+    aire_max = heatmap_data.sum(axis=1).idxmax()
+    cas_aire_max = int(heatmap_data.sum(axis=1).max())
+    st.metric("Aire la plus touchée", aire_max, f"{cas_aire_max} cas", delta_color="inverse")
+
+with col4:
+    moyenne_hebdo = heatmap_data.values.mean()
+    st.metric("Moyenne par cellule", f"{moyenne_hebdo:.1f}")
+
 
 # ============================================================
 # CARTES INTERACTIVES DES PRÉDICTIONS
