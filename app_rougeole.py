@@ -584,30 +584,77 @@ with st.spinner('Chargement données de cas...'):
                 st.sidebar.info("📊 Format agrégé détecté - Expansion en linelist...")
                 
                 expanded_rows = []
+                lignes_ignorees = 0
+                
                 for _, row in df_raw.iterrows():
-                    aire = row.get('health_area') or row.get('Aire_Sante', 'Inconnu')
-                    semaine = int(row['Semaine_Epi'])
-                    cas_total = int(row['Cas_Total'])
-                    annee = row.get('Annee', 2024)
-                    
-                    # Créer une date fictive pour la semaine
+                    # ⚠️ CORRECTION : Vérifier les NaN avant conversion
                     try:
-                        base_date = datetime.strptime(f"{annee}-W{semaine:02d}-1", "%Y-W%W-%w")
-                    except:
-                        base_date = datetime(int(annee), 1, 1) + timedelta(weeks=semaine-1)
+                        aire = row.get('health_area') or row.get('Aire_Sante', 'Inconnu')
+                        
+                        # Vérifier semaine
+                        semaine_val = row.get('Semaine_Epi')
+                        if pd.isna(semaine_val):
+                            lignes_ignorees += 1
+                            continue
+                        semaine = int(semaine_val)
+                        
+                        # Vérifier cas total
+                        cas_total_val = row.get('Cas_Total')
+                        if pd.isna(cas_total_val) or cas_total_val <= 0:
+                            lignes_ignorees += 1
+                            continue
+                        cas_total = int(cas_total_val)
+                        
+                        # Vérifier année
+                        annee_val = row.get('Annee')
+                        if pd.isna(annee_val):
+                            annee = 2024  # Valeur par défaut
+                        else:
+                            annee = int(annee_val)
+                        
+                        # Créer une date fictive pour la semaine
+                        try:
+                            base_date = datetime.strptime(f"{annee}-W{semaine:02d}-1", "%Y-W%W-%w")
+                        except:
+                            base_date = datetime(int(annee), 1, 1) + timedelta(weeks=semaine-1)
+                        
+                        # Créer cas_total lignes individuelles
+                        for i in range(cas_total):
+                            expanded_rows.append({
+                                'ID_Cas': len(expanded_rows) + 1,
+                                'Date_Debut_Eruption': base_date + timedelta(days=np.random.randint(0, 7)),
+                                'Date_Notification': base_date + timedelta(days=np.random.randint(0, 10)),
+                                'Aire_Sante': aire,
+                                'Age_Mois': 24,  # Valeur par défaut
+                                'Statut_Vaccinal': 'Inconnu',
+                                'Sexe': 'Inconnu',
+                                'Issue': 'Inconnu'
+                            })
                     
-                    # Créer cas_total lignes individuelles
-                    for i in range(cas_total):
-                        expanded_rows.append({
-                            'ID_Cas': len(expanded_rows) + 1,
-                            'Date_Debut_Eruption': base_date + timedelta(days=np.random.randint(0, 7)),
-                            'Date_Notification': base_date + timedelta(days=np.random.randint(0, 10)),
-                            'Aire_Sante': aire,
-                            'Age_Mois': 24,  # Valeur par défaut
-                            'Statut_Vaccinal': 'Inconnu',
-                            'Sexe': 'Inconnu',
-                            'Issue': 'Inconnu'
-                        })
+                    except (ValueError, TypeError) as e:
+                        lignes_ignorees += 1
+                        continue
+                
+                if lignes_ignorees > 0:
+                    st.sidebar.warning(f"⚠️ {lignes_ignorees} lignes ignorées (valeurs invalides ou manquantes)")
+                
+                if len(expanded_rows) == 0:
+                    st.error("❌ Aucune donnée valide trouvée dans le CSV")
+                    st.info("""
+                    **Vérifications nécessaires :**
+                    - La colonne `Semaine_Epi` doit contenir des nombres entre 1 et 53
+                    - La colonne `Cas_Total` doit contenir des nombres > 0
+                    - La colonne `Annee` doit contenir des années valides
+                    - Aucune cellule ne doit être vide dans ces colonnes
+                    """)
+                    
+                    with st.expander("🔍 Aperçu de vos données"):
+                        st.write("**Premières lignes :**")
+                        st.dataframe(df_raw.head(10))
+                        st.write("**Valeurs manquantes par colonne :**")
+                        st.write(df_raw.isnull().sum())
+                    
+                    st.stop()
                 
                 df = pd.DataFrame(expanded_rows)
                 st.sidebar.success(f"✅ Expansion : {len(df)} cas individuels créés")
@@ -626,26 +673,42 @@ with st.spinner('Chargement données de cas...'):
                 
                 **Format 1 (Agrégé) :**
                 - `health_area` ou `regions`
-                - `Semaine_Epi`
-                - `Cas_Total`
-                - `Annee`
+                - `Semaine_Epi` (numérique, sans valeurs vides)
+                - `Cas_Total` (numérique > 0, sans valeurs vides)
+                - `Annee` (numérique)
                 
                 **Format 2 (Linelist) :**
                 - `Date_Debut_Eruption`
                 - `Aire_Sante`
                 - Autres colonnes optionnelles...
                 """)
+                
+                with st.expander("🔍 Aperçu de vos données"):
+                    st.write("**Colonnes détectées :**")
+                    st.write(list(df_raw.columns))
+                    st.write("**Premières lignes :**")
+                    st.dataframe(df_raw.head(10))
+                
                 st.stop()
             
             st.sidebar.success(f"✅ {len(df)} cas chargés")
             
         except Exception as e:
             st.error(f"❌ Erreur CSV : {e}")
-            st.stop()
-
+            st.code(f"Type d'erreur : {type(e).__name__}")
             
-        except Exception as e:
-            st.error(f"❌ Erreur CSV : {e}")
+            # Aide contextuelle
+            if "cannot convert float NaN to integer" in str(e):
+                st.warning("""
+                **Problème : Valeurs manquantes (NaN)**
+                
+                Votre fichier contient des cellules vides. Veuillez :
+                1. Ouvrir le fichier CSV dans Excel/LibreOffice
+                2. Supprimer les lignes avec des cellules vides dans `Semaine_Epi`, `Cas_Total` ou `Annee`
+                3. Vérifier que toutes les valeurs sont numériques
+                4. Sauvegarder et réessayer
+                """)
+            
             st.stop()
         
         if vaccination_file is not None:
