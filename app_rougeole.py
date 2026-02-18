@@ -493,57 +493,156 @@ def generate_dummy_vaccination(_sa_gdf):
         "health_area": _sa_gdf["health_area"],
         "Taux_Vaccination": np.random.beta(a=8, b=2, size=len(_sa_gdf)) * 100
     })
+# ============================================================
+# CHARGEMENT LINELIST - DÉTECTION AUTOMATIQUE DU SÉPARATEUR
+# ============================================================
 
-# Chargement des données de cas
-with st.spinner("📥 Chargement données de cas..."):
+with st.spinner('Chargement données de cas...'):
     if mode_demo == "🧪 Mode démo (données simulées)":
         df = generate_dummy_linelists(sa_gdf, start=start_date, end=end_date)
         vaccination_df = generate_dummy_vaccination(sa_gdf)
-        st.sidebar.info(f"📊 {len(df)} cas simulés générés")
-        
+        st.sidebar.info(f"{len(df)} cas simulés générés")
     else:
         if linelist_file is None:
-            st.error("❌ Veuillez uploader un fichier CSV de lineliste")
+            st.error("Veuillez uploader un fichier CSV de lineliste")
             st.stop()
-            
+        
         try:
-            df_raw = pd.read_csv(linelist_file)
+            # ====== DÉTECTION AUTOMATIQUE DU SÉPARATEUR ======
+            sample = linelist_file.read(1024).decode('utf-8', errors='ignore')
+            linelist_file.seek(0)
             
-            if "Semaine_Epi" in df_raw.columns and "Cas_Total" in df_raw.columns:
+            semicolon_count = sample.count(';')
+            comma_count = sample.count(',')
+            tab_count = sample.count('\t')
+            
+            if semicolon_count > comma_count and semicolon_count > tab_count:
+                separator = ';'
+            elif tab_count > comma_count:
+                separator = '\t'
+            else:
+                separator = ','
+            
+            st.sidebar.info(f"🔍 Séparateur détecté : `{repr(separator)}`")
+            
+            # Lire avec le bon séparateur
+            try:
+                df_raw = pd.read_csv(linelist_file, sep=separator, encoding='utf-8')
+            except UnicodeDecodeError:
+                linelist_file.seek(0)
+                df_raw = pd.read_csv(linelist_file, sep=separator, encoding='latin1')
+            
+            st.sidebar.success(f"✅ {len(df_raw)} lignes chargées")
+            
+            # ====== MAPPING INTELLIGENT DES COLONNES ======
+            COLUMNS_MAPPING_EXTENDED = {
+                'health_area': [
+                    'health_area', 'healtharea', 'HEALTH_AREA',
+                    'aire_sante', 'Aire_Sante', 'airesante',
+                    'district', 'District', 'zone', 'Zone',
+                    'name_fr', 'NAME', 'nom', 'Nom'
+                ],
+                'Semaine_Epi': [
+                    'Semaine_Epi', 'SemaineEpi', 'semaine_epi',
+                    'semaine', 'Semaine', 'week', 'Week',
+                    'epi_week', 'SE', 'se'
+                ],
+                'Annee': [
+                    'Annee', 'Année', 'annee', 'année',
+                    'year', 'Year', 'an', 'An'
+                ],
+                'Cas_Total': [
+                    'Cas_Total', 'CasTotal', 'cas_total',
+                    'cas', 'Cas', 'cases', 'Cases',
+                    'nb_cas', 'nombre_cas'
+                ],
+                'Deces': [
+                    'Deces', 'Décès', 'deces', 'décès',
+                    'deaths', 'Deaths', 'nb_deces'
+                ],
+                'Region': [
+                    'regions', 'Regions', 'region', 'Region'
+                ]
+            }
+            
+            # Appliquer le mapping
+            rename_dict = {}
+            for standard_col, possible_cols in COLUMNS_MAPPING_EXTENDED.items():
+                for col in possible_cols:
+                    if col in df_raw.columns:
+                        if col != standard_col:
+                            rename_dict[col] = standard_col
+                        break
+            
+            if rename_dict:
+                df_raw = df_raw.rename(columns=rename_dict)
+                st.sidebar.success(f"🔄 Colonnes renommées : {len(rename_dict)}")
+            
+            # ====== VÉRIFIER FORMAT AGRÉGÉ OU LINELIST ======
+            if 'Semaine_Epi' in df_raw.columns and 'Cas_Total' in df_raw.columns:
+                # FORMAT AGRÉGÉ - Expansion en linelist
+                st.sidebar.info("📊 Format agrégé détecté - Expansion en linelist...")
+                
                 expanded_rows = []
                 for _, row in df_raw.iterrows():
-                    aire = row.get("health_area") or row.get("Aire_Sante") or row.get("name_fr")
-                    semaine = int(row["Semaine_Epi"])
-                    cas_total = int(row["Cas_Total"])
-                    annee = row.get("Annee", 2024)
+                    aire = row.get('health_area') or row.get('Aire_Sante', 'Inconnu')
+                    semaine = int(row['Semaine_Epi'])
+                    cas_total = int(row['Cas_Total'])
+                    annee = row.get('Annee', 2024)
                     
-                    base_date = datetime.strptime(f"{annee}-W{semaine:02d}-1", "%Y-W%W-%w")
+                    # Créer une date fictive pour la semaine
+                    try:
+                        base_date = datetime.strptime(f"{annee}-W{semaine:02d}-1", "%Y-W%W-%w")
+                    except:
+                        base_date = datetime(int(annee), 1, 1) + timedelta(weeks=semaine-1)
                     
+                    # Créer cas_total lignes individuelles
                     for i in range(cas_total):
                         expanded_rows.append({
-                            "ID_Cas": len(expanded_rows) + 1,
-                            "Date_Debut_Eruption": base_date + timedelta(days=np.random.randint(0, 7)),
-                            "Date_Notification": base_date + timedelta(days=np.random.randint(0, 10)),
-                            "Aire_Sante": aire,
-                            "Age_Mois": 0,
-                            "Statut_Vaccinal": "Inconnu",
-                            "Sexe": "Inconnu",
-                            "Issue": "Inconnu"
+                            'ID_Cas': len(expanded_rows) + 1,
+                            'Date_Debut_Eruption': base_date + timedelta(days=np.random.randint(0, 7)),
+                            'Date_Notification': base_date + timedelta(days=np.random.randint(0, 10)),
+                            'Aire_Sante': aire,
+                            'Age_Mois': 24,  # Valeur par défaut
+                            'Statut_Vaccinal': 'Inconnu',
+                            'Sexe': 'Inconnu',
+                            'Issue': 'Inconnu'
                         })
                 
                 df = pd.DataFrame(expanded_rows)
-                
-            elif "Date_Debut_Eruption" in df_raw.columns:
+                st.sidebar.success(f"✅ Expansion : {len(df)} cas individuels créés")
+            
+            elif 'Date_Debut_Eruption' in df_raw.columns:
+                # FORMAT LINELIST STANDARD
                 df = df_raw.copy()
-                
-                for col in ["Date_Debut_Eruption", "Date_Notification"]:
+                for col in ['Date_Debut_Eruption', 'Date_Notification']:
                     if col in df.columns:
                         df[col] = pd.to_datetime(df[col], errors='coerce')
+            
             else:
                 st.error("❌ Format CSV non reconnu")
+                st.info("""
+                **Formats acceptés :**
+                
+                **Format 1 (Agrégé) :**
+                - `health_area` ou `regions`
+                - `Semaine_Epi`
+                - `Cas_Total`
+                - `Annee`
+                
+                **Format 2 (Linelist) :**
+                - `Date_Debut_Eruption`
+                - `Aire_Sante`
+                - Autres colonnes optionnelles...
+                """)
                 st.stop()
             
-            st.sidebar.success(f"✓ {len(df)} cas chargés")
+            st.sidebar.success(f"✅ {len(df)} cas chargés")
+            
+        except Exception as e:
+            st.error(f"❌ Erreur CSV : {e}")
+            st.stop()
+
             
         except Exception as e:
             st.error(f"❌ Erreur CSV : {e}")
