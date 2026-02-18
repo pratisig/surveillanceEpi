@@ -2077,457 +2077,622 @@ with st.spinner("🤖 Préparation des données et entraînement..."):
             )
             st.plotly_chart(fig_imp, use_container_width=True)
     
-    st.subheader(f"📅 Génération des Prédictions - {n_weeks_pred} Semaines")
-    
-    moyenne_historique = weekly_features.groupby("Aire_Sante")["Cas_Observes"].mean().reset_index()
-    moyenne_historique.columns = ["Aire_Sante", "Moyenne_Historique"]
-    
-    risk_df = future_df.groupby("Aire_Sante").agg(
-        Cas_Predits_Total=("Predicted_Cases", "sum"),
-        Cas_Predits_Max=("Predicted_Cases", "max"),
-        Cas_Predits_Moyen=("Predicted_Cases", "mean"),
-        Semaine_Pic=("Predicted_Cases", lambda x: future_df.loc[x.idxmax(), "Semaine_Label"] if len(x) > 0 else "N/A")
-    ).reset_index()
-    
-    risk_df['Cas_Predits_Total'] = risk_df['Cas_Predits_Total'].round(0).astype(int)
-    risk_df['Cas_Predits_Max'] = risk_df['Cas_Predits_Max'].round(0).astype(int)
-    risk_df['Cas_Predits_Moyen'] = risk_df['Cas_Predits_Moyen'].round(1)
-    
-    risk_df = risk_df.merge(moyenne_historique, on="Aire_Sante", how="left")
-    
-    risk_df["Variation_Pct"] = (
-        (risk_df["Cas_Predits_Moyen"] - risk_df["Moyenne_Historique"]) /
-        risk_df["Moyenne_Historique"].replace(0, 1)
-    ) * 100
-    
-    risk_df["Categorie_Variation"] = pd.cut(
-        risk_df["Variation_Pct"],
-        bins=[-np.inf, -seuil_baisse, -10, 10, seuil_hausse, np.inf],
-        labels=["Forte baisse", "Baisse modérée", "Stable", "Hausse modérée", "Forte hausse"]
-    )
-    
-    risk_df = risk_df.sort_values("Variation_Pct", ascending=False)
-    
-    st.subheader("📊 Tableau de Synthèse des Prédictions")
-    
-    st.dataframe(
-        risk_df.style.format({
-            'Cas_Predits_Total': '{:.0f}',
-            'Cas_Predits_Max': '{:.0f}',
-            'Cas_Predits_Moyen': '{:.1f}',
-            'Moyenne_Historique': '{:.1f}',
-            'Variation_Pct': '{:.1f}%'
-        }),
-        use_container_width=True
-    )
-    
-    st.subheader("📈 Visualisations")
-    
-    top_risk = risk_df.head(10)
-    
-    fig_top = px.bar(
-        top_risk,
-        x='Cas_Predits_Total',
-        y='Aire_Sante',
-        orientation='h',
-        title='Top 10 Aires à Risque (Cas prédits totaux)',
-        labels={'Cas_Predits_Total': 'Cas prédits', 'Aire_Sante': 'Aire de santé'},
-        color='Variation_Pct',
-        color_continuous_scale='RdYlGn_r'
-    )
-    
     # ============================================================
+# GÉNÉRATION DES PRÉDICTIONS FUTURES
+# ============================================================
+
+st.subheader(f"📅 Génération des Prédictions - {n_weeks_pred} Semaines")
+
+# Calcul de la dernière semaine réelle dans les données
+derniere_semaine_reelle_epi = df['Semaine_Epi'].max()
+derniere_annee_reelle = df['Annee'].max()
+
+try:
+    derniere_date_reelle = datetime.strptime(
+        f"{derniere_annee_reelle}-W{derniere_semaine_reelle_epi:02d}-1", 
+        "%Y-W%W-%w"
+    )
+except:
+    derniere_date_reelle = end_date
+
+st.info(f"📆 Dernière semaine de données : S{derniere_semaine_reelle_epi:02d} ({derniere_annee_reelle})")
+st.info(f"🔮 Prédiction : S{derniere_semaine_reelle_epi+1:02d} à S{(derniere_semaine_reelle_epi+n_weeks_pred-1) % 52 + 1:02d}")
+
+future_climate = None
+if donnees_dispo["Climat"]:
+    future_start = end_date + timedelta(days=1)
+    future_end = end_date + timedelta(days=n_weeks_pred * 7)
+    
+    with st.spinner("🌡️ Chargement prévisions climatiques..."):
+        try:
+            future_climate = fetch_climate_nasa_power(sa_gdf, future_start, future_end)
+            st.info("✅ Prévisions climatiques intégrées aux prédictions")
+        except:
+            st.warning("⚠️ Prévisions climatiques indisponibles - utilisation valeurs moyennes")
+
+future_predictions = []
+
+for aire in weekly_features["Aire_Sante"].unique():
+    aire_data = weekly_features[weekly_features["Aire_Sante"] == aire].sort_values(['Annee', 'Semaine_Epi'])
+    
+    if aire_data.empty:
+        continue
+    
+    last_obs = aire_data.iloc[-1]
+    
+    last_4_weeks = aire_data.tail(4)['Cas_Observes'].values
+    if len(last_4_weeks) < 4:
+        last_4_weeks = np.pad(last_4_weeks, (4-len(last_4_weeks), 0), 'edge')
+    
+    for i in range(1, n_weeks_pred + 1):
+        nouvelle_semaine_epi = (derniere_semaine_reelle_epi + i - 1) % 52 + 1
+        nouvelle_annee = derniere_annee_reelle + ((derniere_semaine_reelle_epi + i - 1) // 52)
+        
+        future_row = {
+            "Aire_Sante": aire,
+            "Annee": nouvelle_annee,
+            "Semaine_Epi": nouvelle_semaine_epi,
+            "Semaine_Label": f"{nouvelle_annee}-S{str(nouvelle_semaine_epi).zfill(2)}",
+            "Age_Moyen": last_obs["Age_Moyen"] if pd.notna(last_obs["Age_Moyen"]) else 0
+        }
+        
+        if donnees_dispo["Population"]:
+            future_row.update({
+                "Pop_Totale": last_obs["Pop_Totale"] if pd.notna(last_obs["Pop_Totale"]) else 0,
+                "Pop_Enfants": last_obs["Pop_Enfants"] if pd.notna(last_obs["Pop_Enfants"]) else 0,
+                "Densite_Pop": last_obs["Densite_Pop"] if pd.notna(last_obs["Densite_Pop"]) else 0,
+                "Densite_Enfants": last_obs["Densite_Enfants"] if pd.notna(last_obs["Densite_Enfants"]) else 0
+            })
+        
+        if donnees_dispo["Urbanisation"]:
+            future_row["Urban_Encoded"] = last_obs["Urban_Encoded"] if pd.notna(last_obs["Urban_Encoded"]) else 0
+        
+        if donnees_dispo["Climat"]:
+            if future_climate is not None:
+                climate_aire = future_climate[future_climate["health_area"] == aire]
+                if not climate_aire.empty:
+                    temp_val = climate_aire.iloc[0].get("Temperature_Moy", 0)
+                    hum_val = climate_aire.iloc[0].get("Humidite_Moy", 0)
+                    saison_val = climate_aire.iloc[0].get("Saison_Seche_Humidite", 0)
+                    
+                    temp_val = 0 if pd.isna(temp_val) else temp_val
+                    hum_val = 0 if pd.isna(hum_val) else hum_val
+                    saison_val = 0 if pd.isna(saison_val) else saison_val
+                    
+                    temp_norm = scaler_climat.transform([[temp_val, 0, 0]])[0][0]
+                    hum_norm = scaler_climat.transform([[0, hum_val, 0]])[0][1]
+                    saison_norm = scaler_climat.transform([[0, 0, saison_val]])[0][2]
+                    
+                    future_row["Coef_Climatique"] = temp_norm * 0.4 + hum_norm * 0.4 + saison_norm * 0.2
+                else:
+                    future_row["Coef_Climatique"] = last_obs.get("Coef_Climatique", 0)
+            else:
+                future_row["Coef_Climatique"] = last_obs.get("Coef_Climatique", 0)
+        
+        if donnees_dispo["Vaccination"]:
+            future_row["Taux_Vaccination"] = last_obs["Taux_Vaccination"] if pd.notna(last_obs["Taux_Vaccination"]) else 80
+            future_row["Non_Vaccines"] = last_obs["Non_Vaccines"] if pd.notna(last_obs["Non_Vaccines"]) else 20
+        elif "Non_Vaccines" in last_obs:
+            future_row["Non_Vaccines"] = last_obs["Non_Vaccines"] if pd.notna(last_obs["Non_Vaccines"]) else 20
+        
+        if i == 1:
+            future_row["Cas_Observes"] = last_obs["Cas_Observes"]
+            future_row["Cas_Lag_1"] = last_4_weeks[-1]
+            future_row["Cas_Lag_2"] = last_4_weeks[-2] if len(last_4_weeks) >= 2 else last_4_weeks[-1]
+            future_row["Cas_Lag_3"] = last_4_weeks[-3] if len(last_4_weeks) >= 3 else last_4_weeks[-1]
+            future_row["Cas_Lag_4"] = last_4_weeks[-4] if len(last_4_weeks) >= 4 else last_4_weeks[-1]
+        else:
+            prev_predictions_aire = [
+                p["Predicted_Cases"] for p in future_predictions
+                if p["Aire_Sante"] == aire
+            ]
+            
+            if len(prev_predictions_aire) > 0:
+                future_row["Cas_Observes"] = prev_predictions_aire[-1]
+                future_row["Cas_Lag_1"] = prev_predictions_aire[-1] if len(prev_predictions_aire) >= 1 else last_4_weeks[-1]
+                future_row["Cas_Lag_2"] = prev_predictions_aire[-2] if len(prev_predictions_aire) >= 2 else last_4_weeks[-2]
+                future_row["Cas_Lag_3"] = prev_predictions_aire[-3] if len(prev_predictions_aire) >= 3 else last_4_weeks[-3]
+                future_row["Cas_Lag_4"] = prev_predictions_aire[-4] if len(prev_predictions_aire) >= 4 else last_4_weeks[-4]
+            else:
+                future_row["Cas_Observes"] = last_obs["Cas_Observes"]
+                future_row["Cas_Lag_1"] = last_4_weeks[-1]
+                future_row["Cas_Lag_2"] = last_4_weeks[-2] if len(last_4_weeks) >= 2 else last_4_weeks[-1]
+                future_row["Cas_Lag_3"] = last_4_weeks[-3] if len(last_4_weeks) >= 3 else last_4_weeks[-1]
+                future_row["Cas_Lag_4"] = last_4_weeks[-4] if len(last_4_weeks) >= 4 else last_4_weeks[-1]
+        
+        X_future_values = []
+        for col in feature_cols:
+            val = future_row.get(col, 0)
+            if pd.isna(val):
+                val = 0
+            X_future_values.append(val)
+        
+        X_future = np.array([X_future_values])
+        
+        if mode_importance == "👨‍⚕️ Manuel (Expert)":
+            for idx, col in enumerate(feature_cols):
+                if col in column_weights:
+                    X_future[0, idx] = X_future[0, idx] * column_weights[col]
+        
+        if np.isnan(X_future).any():
+            X_future = np.nan_to_num(X_future, nan=0.0)
+        
+        X_future_scaled = scaler.transform(X_future)
+        
+        if np.isnan(X_future_scaled).any():
+            X_future_scaled = np.nan_to_num(X_future_scaled, nan=0.0)
+        
+        predicted_cases = max(0, model.predict(X_future_scaled)[0])
+        
+        if cv_std > 0:
+            noise_seed = hash(aire) % 1000
+            np.random.seed(noise_seed + i)
+            noise = np.random.normal(0, predicted_cases * cv_std * 0.15)
+            predicted_cases = max(0, predicted_cases + noise)
+        
+        future_row["Predicted_Cases"] = predicted_cases
+        future_predictions.append(future_row)
+
+future_df = pd.DataFrame(future_predictions)
+future_df['Predicted_Cases'] = future_df['Predicted_Cases'].round(0).astype(int)
+
+st.success(f"✓ {len(future_df)} prédictions générées ({len(future_df['Aire_Sante'].unique())} aires × {n_weeks_pred} semaines)")
+
+# ============================================================
+# ANALYSE DES PRÉDICTIONS
+# ============================================================
+
+moyenne_historique = weekly_features.groupby("Aire_Sante")["Cas_Observes"].mean().reset_index()
+moyenne_historique.columns = ["Aire_Sante", "Moyenne_Historique"]
+
+risk_df = future_df.groupby("Aire_Sante").agg(
+    Cas_Predits_Total=("Predicted_Cases", "sum"),
+    Cas_Predits_Max=("Predicted_Cases", "max"),
+    Cas_Predits_Moyen=("Predicted_Cases", "mean"),
+    Semaine_Pic=("Predicted_Cases", lambda x: future_df.loc[x.idxmax(), "Semaine_Label"] if len(x) > 0 else "N/A")
+).reset_index()
+
+risk_df['Cas_Predits_Total'] = risk_df['Cas_Predits_Total'].round(0).astype(int)
+risk_df['Cas_Predits_Max'] = risk_df['Cas_Predits_Max'].round(0).astype(int)
+risk_df['Cas_Predits_Moyen'] = risk_df['Cas_Predits_Moyen'].round(1)
+
+risk_df = risk_df.merge(moyenne_historique, on="Aire_Sante", how="left")
+
+risk_df["Variation_Pct"] = (
+    (risk_df["Cas_Predits_Moyen"] - risk_df["Moyenne_Historique"]) /
+    risk_df["Moyenne_Historique"].replace(0, 1)
+) * 100
+
+risk_df["Categorie_Variation"] = pd.cut(
+    risk_df["Variation_Pct"],
+    bins=[-np.inf, -seuil_baisse, -10, 10, seuil_hausse, np.inf],
+    labels=["Forte baisse", "Baisse modérée", "Stable", "Hausse modérée", "Forte hausse"]
+)
+
+risk_df = risk_df.sort_values("Variation_Pct", ascending=False)
+
+st.subheader("📊 Tableau de Synthèse des Prédictions")
+
+st.dataframe(
+    risk_df.style.format({
+        'Cas_Predits_Total': '{:.0f}',
+        'Cas_Predits_Max': '{:.0f}',
+        'Cas_Predits_Moyen': '{:.1f}',
+        'Moyenne_Historique': '{:.1f}',
+        'Variation_Pct': '{:.1f}%'
+    }),
+    use_container_width=True
+)
+
+st.subheader("📈 Visualisations")
+
+top_risk = risk_df.head(10)
+
+fig_top = px.bar(
+    top_risk,
+    x='Cas_Predits_Total',
+    y='Aire_Sante',
+    orientation='h',
+    title='Top 10 Aires à Risque (Cas prédits totaux)',
+    labels={'Cas_Predits_Total': 'Cas prédits', 'Aire_Sante': 'Aire de santé'},
+    color='Variation_Pct',
+    color_continuous_scale='RdYlGn_r'
+)
+
+st.plotly_chart(fig_top, use_container_width=True)
+
+# ============================================================
 # APRÈS LES VISUALISATIONS (APRÈS LA HEATMAP)
 # ============================================================
 
-    st.subheader("🗓️ Heatmap Hebdomadaire des Prédictions")
+st.subheader("🗓️ Heatmap Hebdomadaire des Prédictions")
+
+heatmap_data = future_df.pivot_table(
+    values='Predicted_Cases',
+    index='Aire_Sante',
+    columns='Semaine_Label',
+    aggfunc='sum',
+    fill_value=0
+)
+
+heatmap_data = heatmap_data.round(0).astype(int)
+
+fig_heatmap = px.imshow(
+    heatmap_data,
+    labels=dict(x="Semaine", y="Aire de Santé", color="Cas prédits"),
+    title=f"Prédictions par Aire et par Semaine ({n_weeks_pred} semaines)",
+    color_continuous_scale='Reds',
+    aspect='auto'
+)
+
+fig_heatmap.update_xaxes(side="bottom")
+
+st.plotly_chart(fig_heatmap, use_container_width=True)
+
+# ============================================================
+# CARTES INTERACTIVES DES PRÉDICTIONS
+# ============================================================
+
+st.subheader("🗺️ Cartographie des Prédictions")
+
+# Fusionner les prédictions avec la géométrie
+gdf_predictions = sa_gdf_enrichi.merge(
+    risk_df[['Aire_Sante', 'Cas_Predits_Total', 'Cas_Predits_Max', 'Variation_Pct', 'Categorie_Variation', 'Semaine_Pic']],
+    left_on='health_area',
+    right_on='Aire_Sante',
+    how='left'
+)
+
+# Remplir les valeurs manquantes
+gdf_predictions['Cas_Predits_Total'] = gdf_predictions['Cas_Predits_Total'].fillna(0).astype(int)
+gdf_predictions['Cas_Predits_Max'] = gdf_predictions['Cas_Predits_Max'].fillna(0).astype(int)
+gdf_predictions['Variation_Pct'] = gdf_predictions['Variation_Pct'].fillna(0)
+gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].fillna('Stable')
+gdf_predictions['Semaine_Pic'] = gdf_predictions['Semaine_Pic'].fillna('N/A')
+
+# Créer la carte
+center_lat = gdf_predictions.geometry.centroid.y.mean()
+center_lon = gdf_predictions.geometry.centroid.x.mean()
+
+m_predictions = folium.Map(
+    location=[center_lat, center_lon],
+    zoom_start=6,
+    tiles='CartoDB positron'
+)
+
+# Carte 1 : Cas prédits totaux
+folium.Choropleth(
+    geo_data=gdf_predictions,
+    data=gdf_predictions,
+    columns=['health_area', 'Cas_Predits_Total'],
+    key_on='feature.properties.health_area',
+    fill_color='YlOrRd',
+    fill_opacity=0.7,
+    line_opacity=0.2,
+    legend_name=f'Cas prédits totaux ({n_weeks_pred} semaines)',
+    name='Cas prédits totaux'
+).add_to(m_predictions)
+
+# Carte 2 : Variation par rapport à la moyenne historique
+folium.Choropleth(
+    geo_data=gdf_predictions,
+    data=gdf_predictions,
+    columns=['health_area', 'Variation_Pct'],
+    key_on='feature.properties.health_area',
+    fill_color='RdYlGn_r',
+    fill_opacity=0.7,
+    line_opacity=0.2,
+    legend_name='Variation (%) vs moyenne historique',
+    name='Variation (%)',
+    show=False
+).add_to(m_predictions)
+
+# Ajouter des markers avec popups détaillés
+for idx, row in gdf_predictions.iterrows():
     
-    heatmap_data = future_df.pivot_table(
-        values='Predicted_Cases',
-        index='Aire_Sante',
-        columns='Semaine_Label',
-        aggfunc='sum',
-        fill_value=0
-    )
+    # Couleur selon catégorie
+    if row['Categorie_Variation'] == 'Forte hausse':
+        color = 'red'
+        icon = 'arrow-up'
+    elif row['Categorie_Variation'] == 'Hausse modérée':
+        color = 'orange'
+        icon = 'arrow-up'
+    elif row['Categorie_Variation'] == 'Stable':
+        color = 'blue'
+        icon = 'minus'
+    elif row['Categorie_Variation'] == 'Baisse modérée':
+        color = 'lightgreen'
+        icon = 'arrow-down'
+    else:  # Forte baisse
+        color = 'green'
+        icon = 'arrow-down'
     
-    heatmap_data = heatmap_data.round(0).astype(int)
+    # HTML du popup
+    popup_html = f"""
+    <div style="width:350px; font-family:Arial; font-size:13px;">
+        <h4 style="color:#E4032E; margin:0; padding-bottom:8px; border-bottom:2px solid #E4032E;">
+            {row['health_area']}
+        </h4>
+        <table style="width:100%; margin-top:10px; border-collapse:collapse;">
+            <tr style="background-color:#f9f9f9;">
+                <td style="padding:6px; font-weight:bold;">🔮 Cas prédits (total)</td>
+                <td style="padding:6px; text-align:right;">{row['Cas_Predits_Total']}</td>
+            </tr>
+            <tr>
+                <td style="padding:6px; font-weight:bold;">📈 Cas max (semaine)</td>
+                <td style="padding:6px; text-align:right;">{row['Cas_Predits_Max']}</td>
+            </tr>
+            <tr style="background-color:#f9f9f9;">
+                <td style="padding:6px; font-weight:bold;">📅 Semaine pic</td>
+                <td style="padding:6px; text-align:right;">{row['Semaine_Pic']}</td>
+            </tr>
+            <tr>
+                <td style="padding:6px; font-weight:bold;">📊 Variation</td>
+                <td style="padding:6px; text-align:right; color:{'red' if row['Variation_Pct'] > 0 else 'green'};">
+                    {row['Variation_Pct']:.1f}%
+                </td>
+            </tr>
+            <tr style="background-color:#f0f0f0;">
+                <td colspan="2" style="padding:6px; text-align:center; font-weight:bold;">
+                    {row['Categorie_Variation']}
+                </td>
+            </tr>
+        </table>
+    </div>
+    """
     
-    fig_heatmap = px.imshow(
-        heatmap_data,
-        labels=dict(x="Semaine", y="Aire de Santé", color="Cas prédits"),
-        title=f"Prédictions par Aire et par Semaine ({n_weeks_pred} semaines)",
-        color_continuous_scale='Reds',
-        aspect='auto'
-    )
+    # Taille du marker proportionnelle aux cas prédits
+    radius = min(5 + row['Cas_Predits_Total'] / 10, 25)
     
-    fig_heatmap.update_xaxes(side="bottom")
+    folium.CircleMarker(
+        location=[row.geometry.centroid.y, row.geometry.centroid.x],
+        radius=radius,
+        popup=folium.Popup(popup_html, max_width=400),
+        color=color,
+        fill=True,
+        fillColor=color,
+        fillOpacity=0.7,
+        weight=2
+    ).add_to(m_predictions)
+
+# Ajouter contrôle de couches
+folium.LayerControl().add_to(m_predictions)
+
+# Afficher la carte
+st_folium(m_predictions, width=1200, height=600, key='carte_predictions_rougeole')
+
+# Légende des catégories
+st.markdown(f"""
+<div style="background:#f0f2f6; padding:1rem; border-radius:8px; margin-top:1rem;">
+    <b>🎨 Légende des catégories :</b><br>
+    🔴 <b>Forte hausse</b> : Variation ≥{seuil_hausse}% (Action urgente requise)<br>
+    🟠 <b>Hausse modérée</b> : Variation entre 10% et {seuil_hausse}%<br>
+    🔵 <b>Stable</b> : Variation entre -10% et +10%<br>
+    🟢 <b>Baisse modérée</b> : Variation entre -{seuil_baisse}% et -10%<br>
+    🟢 <b>Forte baisse</b> : Variation ≤-{seuil_baisse}% (Amélioration significative)
+</div>
+""", unsafe_allow_html=True)
+
+# Carte des clusters à risque
+st.subheader("🎯 Carte des Zones à Risque Élevé")
+
+# Filtrer les aires en forte hausse
+aires_critiques = gdf_predictions[gdf_predictions['Categorie_Variation'] == 'Forte hausse']
+
+if len(aires_critiques) > 0:
     
-    st.plotly_chart(fig_heatmap, use_container_width=True)
-    
-    # ============================================================
-    # CARTES INTERACTIVES DES PRÉDICTIONS
-    # ============================================================
-    
-    st.subheader("🗺️ Cartographie des Prédictions")
-    
-    # Fusionner les prédictions avec la géométrie
-    gdf_predictions = sa_gdf_enrichi.merge(
-        risk_df[['Aire_Sante', 'Cas_Predits_Total', 'Cas_Predits_Max', 'Variation_Pct', 'Categorie_Variation', 'Semaine_Pic']],
-        left_on='health_area',
-        right_on='Aire_Sante',
-        how='left'
-    )
-    
-    # Remplir les valeurs manquantes
-    gdf_predictions['Cas_Predits_Total'] = gdf_predictions['Cas_Predits_Total'].fillna(0).astype(int)
-    gdf_predictions['Cas_Predits_Max'] = gdf_predictions['Cas_Predits_Max'].fillna(0).astype(int)
-    gdf_predictions['Variation_Pct'] = gdf_predictions['Variation_Pct'].fillna(0)
-    gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].fillna('Stable')
-    gdf_predictions['Semaine_Pic'] = gdf_predictions['Semaine_Pic'].fillna('N/A')
-    
-    # Créer la carte
-    center_lat = gdf_predictions.geometry.centroid.y.mean()
-    center_lon = gdf_predictions.geometry.centroid.x.mean()
-    
-    m_predictions = folium.Map(
+    m_risque = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=6,
         tiles='CartoDB positron'
     )
     
-    # Carte 1 : Cas prédits totaux
-    folium.Choropleth(
-        geo_data=gdf_predictions,
-        data=gdf_predictions,
-        columns=['health_area', 'Cas_Predits_Total'],
-        key_on='feature.properties.health_area',
-        fill_color='YlOrRd',
-        fill_opacity=0.7,
-        line_opacity=0.2,
-        legend_name=f'Cas prédits totaux ({n_weeks_pred} semaines)',
-        name='Cas prédits totaux'
-    ).add_to(m_predictions)
+    # Ajouter toutes les aires en gris clair
+    folium.GeoJson(
+        gdf_predictions,
+        style_function=lambda x: {
+            'fillColor': '#e0e0e0',
+            'color': '#999999',
+            'weight': 1,
+            'fillOpacity': 0.3
+        },
+        name='Toutes les aires'
+    ).add_to(m_risque)
     
-    # Carte 2 : Variation par rapport à la moyenne historique
-    folium.Choropleth(
-        geo_data=gdf_predictions,
-        data=gdf_predictions,
-        columns=['health_area', 'Variation_Pct'],
-        key_on='feature.properties.health_area',
-        fill_color='RdYlGn_r',
-        fill_opacity=0.7,
-        line_opacity=0.2,
-        legend_name='Variation (%) vs moyenne historique',
-        name='Variation (%)',
-        show=False
-    ).add_to(m_predictions)
-    
-    # Ajouter des markers avec popups détaillés
-    for idx, row in gdf_predictions.iterrows():
+    # Mettre en évidence les aires critiques
+    for idx, row in aires_critiques.iterrows():
         
-        # Couleur selon catégorie
-        if row['Categorie_Variation'] == 'Forte hausse':
-            color = 'red'
-            icon = 'arrow-up'
-        elif row['Categorie_Variation'] == 'Hausse modérée':
-            color = 'orange'
-            icon = 'arrow-up'
-        elif row['Categorie_Variation'] == 'Stable':
-            color = 'blue'
-            icon = 'minus'
-        elif row['Categorie_Variation'] == 'Baisse modérée':
-            color = 'lightgreen'
-            icon = 'arrow-down'
-        else:  # Forte baisse
-            color = 'green'
-            icon = 'arrow-down'
+        # Style rouge pour zones critiques
+        folium.GeoJson(
+            row.geometry,
+            style_function=lambda x: {
+                'fillColor': '#ff0000',
+                'color': '#8B0000',
+                'weight': 3,
+                'fillOpacity': 0.6
+            }
+        ).add_to(m_risque)
         
-        # HTML du popup
-        popup_html = f"""
-        <div style="width:350px; font-family:Arial; font-size:13px;">
-            <h4 style="color:#E4032E; margin:0; padding-bottom:8px; border-bottom:2px solid #E4032E;">
-                {row['health_area']}
-            </h4>
-            <table style="width:100%; margin-top:10px; border-collapse:collapse;">
-                <tr style="background-color:#f9f9f9;">
-                    <td style="padding:6px; font-weight:bold;">🔮 Cas prédits (total)</td>
-                    <td style="padding:6px; text-align:right;">{row['Cas_Predits_Total']}</td>
-                </tr>
-                <tr>
-                    <td style="padding:6px; font-weight:bold;">📈 Cas max (semaine)</td>
-                    <td style="padding:6px; text-align:right;">{row['Cas_Predits_Max']}</td>
-                </tr>
-                <tr style="background-color:#f9f9f9;">
-                    <td style="padding:6px; font-weight:bold;">📅 Semaine pic</td>
-                    <td style="padding:6px; text-align:right;">{row['Semaine_Pic']}</td>
-                </tr>
-                <tr>
-                    <td style="padding:6px; font-weight:bold;">📊 Variation</td>
-                    <td style="padding:6px; text-align:right; color:{'red' if row['Variation_Pct'] > 0 else 'green'};">
-                        {row['Variation_Pct']:.1f}%
-                    </td>
-                </tr>
-                <tr style="background-color:#f0f0f0;">
-                    <td colspan="2" style="padding:6px; text-align:center; font-weight:bold;">
-                        {row['Categorie_Variation']}
-                    </td>
-                </tr>
-            </table>
-        </div>
-        """
-        
-        # Taille du marker proportionnelle aux cas prédits
-        radius = min(5 + row['Cas_Predits_Total'] / 10, 25)
-        
-        folium.CircleMarker(
+        # Marker avec alerte
+        folium.Marker(
             location=[row.geometry.centroid.y, row.geometry.centroid.x],
-            radius=radius,
-            popup=folium.Popup(popup_html, max_width=400),
-            color=color,
-            fill=True,
-            fillColor=color,
-            fillOpacity=0.7,
-            weight=2
-        ).add_to(m_predictions)
+            popup=folium.Popup(f"""
+            <div style="width:250px; font-family:Arial;">
+                <h4 style="color:red; margin:0;">⚠️ ALERTE</h4>
+                <p style="margin:5px 0;"><b>{row['health_area']}</b></p>
+                <p style="margin:5px 0;">Cas prédits : <b>{row['Cas_Predits_Total']}</b></p>
+                <p style="margin:5px 0;">Hausse : <b style="color:red;">+{row['Variation_Pct']:.1f}%</b></p>
+                <p style="margin:5px 0;">Pic : <b>{row['Semaine_Pic']}</b></p>
+            </div>
+            """, max_width=300),
+            icon=folium.Icon(color='red', icon='exclamation-triangle', prefix='fa')
+        ).add_to(m_risque)
     
-    # Ajouter contrôle de couches
-    folium.LayerControl().add_to(m_predictions)
+    st_folium(m_risque, width=1200, height=600, key='carte_risque_rougeole')
     
-    # Afficher la carte
-    st_folium(m_predictions, width=1200, height=600, key='carte_predictions_rougeole')
+    st.error(f"🚨 **{len(aires_critiques)} aires identifiées à risque élevé** - Intervention prioritaire recommandée")
     
-    # Légende des catégories
-    st.markdown("""
-    <div style="background:#f0f2f6; padding:1rem; border-radius:8px; margin-top:1rem;">
-        <b>🎨 Légende des catégories :</b><br>
-        🔴 <b>Forte hausse</b> : Variation ≥{seuil_hausse}% (Action urgente requise)<br>
-        🟠 <b>Hausse modérée</b> : Variation entre 10% et {seuil_hausse}%<br>
-        🔵 <b>Stable</b> : Variation entre -10% et +10%<br>
-        🟢 <b>Baisse modérée</b> : Variation entre -{seuil_baisse}% et -10%<br>
-        🟢 <b>Forte baisse</b> : Variation ≤-{seuil_baisse}% (Amélioration significative)
-    </div>
-    """.format(seuil_hausse=seuil_hausse, seuil_baisse=seuil_baisse), unsafe_allow_html=True)
+else:
+    st.success("✅ Aucune zone à risque élevé identifiée dans les prédictions")
+
+# Carte de chaleur (heatmap géographique) si beaucoup de cas
+if gdf_predictions['Cas_Predits_Total'].sum() > 100:
     
-    # Carte des clusters à risque
-    st.subheader("🎯 Carte des Zones à Risque Élevé")
+    st.subheader("🔥 Carte de Chaleur des Cas Prédits")
     
-    # Filtrer les aires en forte hausse
-    aires_critiques = gdf_predictions[gdf_predictions['Categorie_Variation'] == 'Forte hausse']
+    # Préparer les données pour heatmap
+    heat_data = []
+    for idx, row in gdf_predictions.iterrows():
+        if row['Cas_Predits_Total'] > 0:
+            lat = row.geometry.centroid.y
+            lon = row.geometry.centroid.x
+            weight = row['Cas_Predits_Total']
+            heat_data.append([lat, lon, weight])
     
-    if len(aires_critiques) > 0:
-        
-        m_risque = folium.Map(
+    if len(heat_data) > 0:
+        m_heat = folium.Map(
             location=[center_lat, center_lon],
             zoom_start=6,
             tiles='CartoDB positron'
         )
         
-        # Ajouter toutes les aires en gris clair
-        folium.GeoJson(
-            gdf_predictions,
-            style_function=lambda x: {
-                'fillColor': '#e0e0e0',
-                'color': '#999999',
-                'weight': 1,
-                'fillOpacity': 0.3
-            },
-            name='Toutes les aires'
-        ).add_to(m_risque)
+        # Ajouter heatmap
+        from folium.plugins import HeatMap
+        HeatMap(
+            heat_data,
+            min_opacity=0.3,
+            max_opacity=0.8,
+            radius=25,
+            blur=20,
+            gradient={
+                0.0: 'blue',
+                0.3: 'lime',
+                0.5: 'yellow',
+                0.7: 'orange',
+                1.0: 'red'
+            }
+        ).add_to(m_heat)
         
-        # Mettre en évidence les aires critiques
-        for idx, row in aires_critiques.iterrows():
-            
-            # Style rouge pour zones critiques
-            folium.GeoJson(
-                row.geometry,
-                style_function=lambda x: {
-                    'fillColor': '#ff0000',
-                    'color': '#8B0000',
-                    'weight': 3,
-                    'fillOpacity': 0.6
-                }
-            ).add_to(m_risque)
-            
-            # Marker avec alerte
-            folium.Marker(
-                location=[row.geometry.centroid.y, row.geometry.centroid.x],
-                popup=folium.Popup(f"""
-                <div style="width:250px; font-family:Arial;">
-                    <h4 style="color:red; margin:0;">⚠️ ALERTE</h4>
-                    <p style="margin:5px 0;"><b>{row['health_area']}</b></p>
-                    <p style="margin:5px 0;">Cas prédits : <b>{row['Cas_Predits_Total']}</b></p>
-                    <p style="margin:5px 0;">Hausse : <b style="color:red;">+{row['Variation_Pct']:.1f}%</b></p>
-                    <p style="margin:5px 0;">Pic : <b>{row['Semaine_Pic']}</b></p>
-                </div>
-                """, max_width=300),
-                icon=folium.Icon(color='red', icon='exclamation-triangle', prefix='fa')
-            ).add_to(m_risque)
+        st_folium(m_heat, width=1200, height=600, key='heatmap_rougeole')
         
-        st_folium(m_risque, width=1200, height=600, key='carte_risque_rougeole')
-        
-        st.error(f"🚨 **{len(aires_critiques)} aires identifiées à risque élevé** - Intervention prioritaire recommandée")
-        
-    else:
-        st.success("✅ Aucune zone à risque élevé identifiée dans les prédictions")
+        st.info("💡 Les zones rouges/oranges indiquent les concentrations de cas prédits les plus élevées")
+
+# ============================================================
+# SUITE DU CODE : ALERTES ET TÉLÉCHARGEMENTS
+# ============================================================
+
+st.subheader("🚨 Alertes et Recommandations")
+
+forte_hausse = risk_df[risk_df['Categorie_Variation'] == 'Forte hausse']
+
+if len(forte_hausse) > 0:
+    st.error(f"⚠️ **{len(forte_hausse)} aires en FORTE HAUSSE** (≥{seuil_hausse}%)")
     
-    # Carte de chaleur (heatmap géographique) si beaucoup de cas
-    if gdf_predictions['Cas_Predits_Total'].sum() > 100:
-        
-        st.subheader("🔥 Carte de Chaleur des Cas Prédits")
-        
-        # Préparer les données pour heatmap
-        heat_data = []
-        for idx, row in gdf_predictions.iterrows():
-            if row['Cas_Predits_Total'] > 0:
-                lat = row.geometry.centroid.y
-                lon = row.geometry.centroid.x
-                weight = row['Cas_Predits_Total']
-                heat_data.append([lat, lon, weight])
-        
-        if len(heat_data) > 0:
-            m_heat = folium.Map(
-                location=[center_lat, center_lon],
-                zoom_start=6,
-                tiles='CartoDB positron'
-            )
-            
-            # Ajouter heatmap
-            from folium.plugins import HeatMap
-            HeatMap(
-                heat_data,
-                min_opacity=0.3,
-                max_opacity=0.8,
-                radius=25,
-                blur=20,
-                gradient={
-                    0.0: 'blue',
-                    0.3: 'lime',
-                    0.5: 'yellow',
-                    0.7: 'orange',
-                    1.0: 'red'
-                }
-            ).add_to(m_heat)
-            
-            st_folium(m_heat, width=1200, height=600, key='heatmap_rougeole')
-            
-            st.info("💡 Les zones rouges/oranges indiquent les concentrations de cas prédits les plus élevées")
-    
-    # ============================================================
-    # SUITE DU CODE : ALERTES ET TÉLÉCHARGEMENTS
-    # ============================================================
-    
-    st.subheader("🚨 Alertes et Recommandations")
-    
-    forte_hausse = risk_df[risk_df['Categorie_Variation'] == 'Forte hausse']
-    
-    if len(forte_hausse) > 0:
-        st.error(f"⚠️ **{len(forte_hausse)} aires en FORTE HAUSSE** (≥{seuil_hausse}%)")
-        
-        with st.expander("📋 Détails des aires critiques", expanded=True):
-            st.dataframe(
-                forte_hausse[['Aire_Sante', 'Cas_Predits_Total', 'Variation_Pct', 'Semaine_Pic']]
-                .style.format({
-                    'Cas_Predits_Total': '{:.0f}',
-                    'Variation_Pct': '{:.1f}%'
-                }),
-                use_container_width=True
-            )
-            
-            st.markdown("**🎯 Actions recommandées :**")
-            st.markdown("- Intensifier la surveillance épidémiologique")
-            st.markdown("- Préparer campagne de vaccination réactive (CVR)")
-            st.markdown("- Renforcer stocks de vaccins et intrants")
-            st.markdown("- Communication précoce aux équipes terrain")
-    else:
-        st.success("✅ Aucune aire en forte hausse détectée")
-    
-    forte_baisse = risk_df[risk_df['Categorie_Variation'] == 'Forte baisse']
-    
-    if len(forte_baisse) > 0:
-        st.success(f"✅ **{len(forte_baisse)} aires en FORTE BAISSE** (≥{seuil_baisse}%)")
-        
-        with st.expander("📋 Aires en amélioration"):
-            st.dataframe(
-                forte_baisse[['Aire_Sante', 'Cas_Predits_Total', 'Variation_Pct']]
-                .style.format({
-                    'Cas_Predits_Total': '{:.0f}',
-                    'Variation_Pct': '{:.1f}%'
-                }),
-                use_container_width=True
-            )
-    
-    st.subheader("💾 Téléchargements")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        csv_predictions = future_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Prédictions détaillées (CSV)",
-            data=csv_predictions,
-            file_name=f"predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key="dl_pred_csv"
+    with st.expander("📋 Détails des aires critiques", expanded=True):
+        st.dataframe(
+            forte_hausse[['Aire_Sante', 'Cas_Predits_Total', 'Variation_Pct', 'Semaine_Pic']]
+            .style.format({
+                'Cas_Predits_Total': '{:.0f}',
+                'Variation_Pct': '{:.1f}%'
+            }),
+            use_container_width=True
         )
-    
-    with col2:
-        csv_synthese = risk_df.to_csv(index=False)
-        st.download_button(
-            label="📊 Synthèse par aire (CSV)",
-            data=csv_synthese,
-            file_name=f"synthese_risque_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key="dl_synth_csv"
-        )
-    
-    with col3:
-        from io import BytesIO
         
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            risk_df.to_excel(writer, sheet_name='Synthèse', index=False)
-            future_df.to_excel(writer, sheet_name='Prédictions détaillées', index=False)
-            heatmap_data.to_excel(writer, sheet_name='Heatmap')
-        
-        st.download_button(
-            label="📊 Rapport complet (Excel)",
-            data=output.getvalue(),
-            file_name=f"rapport_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            key="dl_rapport_excel"
+        st.markdown("**🎯 Actions recommandées :**")
+        st.markdown("- Intensifier la surveillance épidémiologique")
+        st.markdown("- Préparer campagne de vaccination réactive (CVR)")
+        st.markdown("- Renforcer stocks de vaccins et intrants")
+        st.markdown("- Communication précoce aux équipes terrain")
+else:
+    st.success("✅ Aucune aire en forte hausse détectée")
+
+forte_baisse = risk_df[risk_df['Categorie_Variation'] == 'Forte baisse']
+
+if len(forte_baisse) > 0:
+    st.success(f"✅ **{len(forte_baisse)} aires en FORTE BAISSE** (≥{seuil_baisse}%)")
+    
+    with st.expander("📋 Aires en amélioration"):
+        st.dataframe(
+            forte_baisse[['Aire_Sante', 'Cas_Predits_Total', 'Variation_Pct']]
+            .style.format({
+                'Cas_Predits_Total': '{:.0f}',
+                'Variation_Pct': '{:.1f}%'
+            }),
+            use_container_width=True
         )
+
+st.subheader("💾 Téléchargements")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    csv_predictions = future_df.to_csv(index=False)
+    st.download_button(
+        label="📥 Prédictions détaillées (CSV)",
+        data=csv_predictions,
+        file_name=f"predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="dl_pred_csv"
+    )
+
+with col2:
+    csv_synthese = risk_df.to_csv(index=False)
+    st.download_button(
+        label="📊 Synthèse par aire (CSV)",
+        data=csv_synthese,
+        file_name=f"synthese_risque_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="dl_synth_csv"
+    )
+
+with col3:
+    from io import BytesIO
     
-    # Export GeoJSON des prédictions
-    col4, col5, col6 = st.columns(3)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        risk_df.to_excel(writer, sheet_name='Synthèse', index=False)
+        future_df.to_excel(writer, sheet_name='Prédictions détaillées', index=False)
+        heatmap_data.to_excel(writer, sheet_name='Heatmap')
     
-    with col4:
-        geojson_predictions = gdf_predictions.to_json()
+    st.download_button(
+        label="📊 Rapport complet (Excel)",
+        data=output.getvalue(),
+        file_name=f"rapport_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="dl_rapport_excel"
+    )
+
+# Export GeoJSON des prédictions
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    geojson_predictions = gdf_predictions.to_json()
+    st.download_button(
+        label="🗺️ Carte prédictions (GeoJSON)",
+        data=geojson_predictions,
+        file_name=f"carte_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.geojson",
+        mime="application/json",
+        use_container_width=True,
+        key="dl_geojson_pred"
+    )
+
+with col5:
+    if len(aires_critiques) > 0:
+        geojson_risque = aires_critiques.to_json()
         st.download_button(
-            label="🗺️ Carte prédictions (GeoJSON)",
-            data=geojson_predictions,
-            file_name=f"carte_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.geojson",
+            label="⚠️ Zones à risque (GeoJSON)",
+            data=geojson_risque,
+            file_name=f"zones_risque_rougeole_{datetime.now().strftime('%Y%m%d')}.geojson",
             mime="application/json",
             use_container_width=True,
-            key="dl_geojson_pred"
+            key="dl_geojson_risque"
         )
-    
-    with col5:
-        if len(aires_critiques) > 0:
-            geojson_risque = aires_critiques.to_json()
-            st.download_button(
-                label="⚠️ Zones à risque (GeoJSON)",
-                data=geojson_risque,
-                file_name=f"zones_risque_rougeole_{datetime.now().strftime('%Y%m%d')}.geojson",
-                mime="application/json",
-                use_container_width=True,
-                key="dl_geojson_risque"
-            )
-    
-    st.markdown("---")
-    st.success("✅ Modélisation terminée avec succès !")
-    st.info("💡 Ajustez les paramètres dans la sidebar pour relancer une nouvelle prédiction")
-    
-    st.stop()
+
+st.markdown("---")
+st.success("✅ Modélisation terminée avec succès !")
+st.info("💡 Ajustez les paramètres dans la sidebar pour relancer une nouvelle prédiction")
+
+st.stop()
