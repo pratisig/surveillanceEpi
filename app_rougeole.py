@@ -770,7 +770,59 @@ df = normaliser_colonnes(df, COLONNES_MAPPING)
 # Si "ID_Cas" n'existe pas, en créer une
 if "ID_Cas" not in df.columns:
     df["ID_Cas"] = range(1, len(df) + 1)
+# Normaliser les colonnes
+if 'Date_Debut_Eruption' in df.columns:
+    df['Date_Debut_Eruption'] = pd.to_datetime(df['Date_Debut_Eruption'], errors='coerce')
+    dates_valides = df['Date_Debut_Eruption'].dropna()
+    
+    if len(dates_valides) > 0:
+        date_min_data = dates_valides.min().date()
+        date_max_data = dates_valides.max().date()
+        
+        # Afficher la plage disponible
+        st.info(f"📅 **Plage de données disponibles :** {date_min_data} → {date_max_data}")
+        
+        # Vérifier que les dates sélectionnées sont valides
+        if start_date < date_min_data:
+            st.warning(f"⚠️ Date de début ajustée : {start_date} → {date_min_data} (données disponibles)")
+            start_date = date_min_data
+        
+        if end_date > date_max_data:
+            st.warning(f"⚠️ Date de fin ajustée : {end_date} → {date_max_data} (dernières données)")
+            end_date = date_max_data
+        
+        if start_date > end_date:
+            st.error("❌ La date de début doit être antérieure à la date de fin")
+            st.stop()
+        
+        # FILTRER LES DONNÉES par la période sélectionnée
+        df_before_filter = len(df)
+        df = df[(df['Date_Debut_Eruption'] >= pd.Timestamp(start_date)) & 
+                (df['Date_Debut_Eruption'] <= pd.Timestamp(end_date))]
+        df_after_filter = len(df)
+        
+        if df_after_filter == 0:
+            st.error(f"❌ Aucune donnée disponible pour la période {start_date} → {end_date}")
+            st.info(f"Plage disponible : {date_min_data} → {date_max_data}")
+            st.stop()
+        
+        st.success(f"✅ **{df_after_filter:,} cas** sur la période sélectionnée ({df_before_filter - df_after_filter} cas exclus)")
+    else:
+        st.error("❌ Aucune date valide trouvée dans les données")
+        st.stop()
 
+# ====== CRÉER LES COLONNES TEMPORELLES ======
+if 'Date_Debut_Eruption' in df.columns:
+    df['Annee'] = df['Date_Debut_Eruption'].dt.isocalendar().year
+    df['Semaine_Epi'] = df['Date_Debut_Eruption'].dt.isocalendar().week
+else:
+    st.error("❌ Colonne 'Date_Debut_Eruption' manquante")
+    st.stop()
+
+# Vérifier qu'il reste des données après filtrage
+if len(df) == 0:
+    st.error("❌ Aucune donnée disponible après filtrage")
+    st.stop()
 # Si "Aire_Sante" n'existe pas, essayer de la créer depuis sa_gdf
 if "Aire_Sante" not in df.columns:
     # Chercher n'importe quelle colonne qui pourrait contenir un nom d'aire
@@ -2328,8 +2380,10 @@ fig_heatmap = go.Figure(data=go.Heatmap(
     colorscale='Reds',
     showscale=True,
     colorbar=dict(
-        title="Cas<br>prédits",
-        titleside="right",
+        title=dict(
+            text="Cas<br>prédits",
+            side="right"
+        ),
         tickmode="linear",
         tick0=0,
         dtick=max(1, heatmap_data.values.max() // 10)
@@ -2390,11 +2444,37 @@ with col4:
     st.metric("Moyenne par cellule", f"{moyenne_hebdo:.1f}")
 
 
+
 # ============================================================
 # CARTES INTERACTIVES DES PRÉDICTIONS
 # ============================================================
 
 st.subheader("🗺️ Cartographie des Prédictions")
+
+# Vérifier la correspondance des aires
+aires_gdf = set(sa_gdf_enrichi['health_area'].unique())
+aires_risk = set(risk_df['Aire_Sante'].unique())
+aires_communes = aires_gdf.intersection(aires_risk)
+
+if len(aires_communes) == 0:
+    st.error("❌ Aucune correspondance entre les aires géographiques et les prédictions")
+    
+    with st.expander("🔍 Diagnostic des aires"):
+        st.write("**Aires dans le shapefile :**")
+        st.write(list(aires_gdf)[:10])
+        st.write("**Aires dans les prédictions :**")
+        st.write(list(aires_risk)[:10])
+        
+        # Tentative de fuzzy matching
+        from difflib import get_close_matches
+        st.write("**Correspondances possibles (fuzzy) :**")
+        for aire_risk in list(aires_risk)[:5]:
+            matches = get_close_matches(aire_risk, list(aires_gdf), n=3, cutoff=0.6)
+            st.write(f"- `{aire_risk}` → {matches}")
+    
+    st.stop()
+else:
+    st.info(f"✅ {len(aires_communes)} aires correspondent entre géographie et prédictions")
 
 # Fusionner les prédictions avec la géométrie
 gdf_predictions = sa_gdf_enrichi.merge(
@@ -2404,12 +2484,23 @@ gdf_predictions = sa_gdf_enrichi.merge(
     how='left'
 )
 
+# Compter les aires sans prédictions
+aires_sans_pred = gdf_predictions[gdf_predictions['Cas_Predits_Total'].isna()]
+if len(aires_sans_pred) > 0:
+    st.warning(f"⚠️ {len(aires_sans_pred)} aires sans prédictions (pas de données historiques)")
+
 # Remplir les valeurs manquantes
 gdf_predictions['Cas_Predits_Total'] = gdf_predictions['Cas_Predits_Total'].fillna(0).astype(int)
 gdf_predictions['Cas_Predits_Max'] = gdf_predictions['Cas_Predits_Max'].fillna(0).astype(int)
 gdf_predictions['Variation_Pct'] = gdf_predictions['Variation_Pct'].fillna(0)
-gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].fillna('Stable')
+gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].fillna('Aucune donnée')
 gdf_predictions['Semaine_Pic'] = gdf_predictions['Semaine_Pic'].fillna('N/A')
+
+# Vérifier qu'il y a au moins une prédiction valide
+if gdf_predictions['Cas_Predits_Total'].sum() == 0:
+    st.error("❌ Aucune prédiction valide générée")
+    st.info("Vérifiez que les noms d'aires dans votre CSV correspondent exactement aux noms dans le shapefile")
+    st.stop()
 
 # Créer la carte
 center_lat = gdf_predictions.geometry.centroid.y.mean()
@@ -2421,18 +2512,23 @@ m_predictions = folium.Map(
     tiles='CartoDB positron'
 )
 
-# Carte 1 : Cas prédits totaux
-folium.Choropleth(
-    geo_data=gdf_predictions,
-    data=gdf_predictions,
-    columns=['health_area', 'Cas_Predits_Total'],
-    key_on='feature.properties.health_area',
-    fill_color='YlOrRd',
-    fill_opacity=0.7,
-    line_opacity=0.2,
-    legend_name=f'Cas prédits totaux ({n_weeks_pred} semaines)',
-    name='Cas prédits totaux'
-).add_to(m_predictions)
+# Carte 1 : Cas prédits totaux (UNIQUEMENT aires avec prédictions)
+gdf_avec_predictions = gdf_predictions[gdf_predictions['Cas_Predits_Total'] > 0]
+
+if len(gdf_avec_predictions) > 0:
+    folium.Choropleth(
+        geo_data=gdf_avec_predictions,
+        data=gdf_avec_predictions,
+        columns=['health_area', 'Cas_Predits_Total'],
+        key_on='feature.properties.health_area',
+        fill_color='YlOrRd',
+        fill_opacity=0.7,
+        line_opacity=0.2,
+        legend_name=f'Cas prédits totaux ({n_weeks_pred} semaines)',
+        name='Cas prédits totaux'
+    ).add_to(m_predictions)
+else:
+    st.error("❌ Aucune aire avec des prédictions > 0")
 
 # Carte 2 : Variation par rapport à la moyenne historique
 folium.Choropleth(
@@ -2451,6 +2547,10 @@ folium.Choropleth(
 # Ajouter des markers avec popups détaillés
 for idx, row in gdf_predictions.iterrows():
     
+    # IGNORER les aires sans prédictions
+    if row['Cas_Predits_Total'] == 0:
+        continue
+    
     # Couleur selon catégorie
     if row['Categorie_Variation'] == 'Forte hausse':
         color = 'red'
@@ -2464,9 +2564,12 @@ for idx, row in gdf_predictions.iterrows():
     elif row['Categorie_Variation'] == 'Baisse modérée':
         color = 'lightgreen'
         icon = 'arrow-down'
-    else:  # Forte baisse
+    elif row['Categorie_Variation'] == 'Forte baisse':
         color = 'green'
         icon = 'arrow-down'
+    else:
+        color = 'gray'
+        icon = 'question'
     
     # HTML du popup
     popup_html = f"""
@@ -2477,7 +2580,7 @@ for idx, row in gdf_predictions.iterrows():
         <table style="width:100%; margin-top:10px; border-collapse:collapse;">
             <tr style="background-color:#f9f9f9;">
                 <td style="padding:6px; font-weight:bold;">🔮 Cas prédits (total)</td>
-                <td style="padding:6px; text-align:right;">{row['Cas_Predits_Total']}</td>
+                <td style="padding:6px; text-align:right;"><b>{row['Cas_Predits_Total']}</b></td>
             </tr>
             <tr>
                 <td style="padding:6px; font-weight:bold;">📈 Cas max (semaine)</td>
