@@ -542,7 +542,19 @@ def generate_dummy_vaccination(_sa_gdf):
 
 with st.spinner('Chargement données de cas...'):
     if mode_demo == "🧪 Mode démo (données simulées)":
-        df = generate_dummy_linelists(sa_gdf, start=start_date, end=end_date)
+        # Convertir les semaines en dates pour la génération de données démo
+        try:
+            date_debut_demo = datetime.strptime(f"{annee_debut}-W{semaine_debut:02d}-1", "%Y-W%W-%w")
+        except:
+            date_debut_demo = datetime(annee_debut, 1, 1) + timedelta(weeks=semaine_debut-1)
+        
+        try:
+            date_fin_demo = datetime.strptime(f"{annee_fin}-W{semaine_fin:02d}-1", "%Y-W%W-%w")
+        except:
+            date_fin_demo = datetime(annee_fin, 1, 1) + timedelta(weeks=semaine_fin-1)
+        
+        df = generate_dummy_linelists(sa_gdf, start=date_debut_demo, end=date_fin_demo)
+
         vaccination_df = generate_dummy_vaccination(sa_gdf)
         st.sidebar.info(f"{len(df)} cas simulés générés")
     else:
@@ -2404,15 +2416,20 @@ try:
         "%Y-W%W-%w"
     )
 except:
-    derniere_date_reelle = end_date
+    # Calculer la dernière date à partir de la dernière semaine
+    try:
+        derniere_date_reelle = datetime.strptime(f"{derniere_annee_reelle}-W{derniere_semaine_reelle_epi:02d}-1", "%Y-W%W-%w")
+    except:
+        derniere_date_reelle = datetime(derniere_annee_reelle, 1, 1) + timedelta(weeks=derniere_semaine_reelle_epi-1)
+    
+    st.info(f"📅 Dernière semaine de données : S{derniere_semaine_reelle_epi:02d}/{derniere_annee_reelle}")
+    st.info(f"🔮 Prédiction : S{(derniere_semaine_reelle_epi+1):02d} → S{((derniere_semaine_reelle_epi+n_weeks_pred-1) % 52)+1:02d}")
+    
+    future_climate = None
+    if donnees_dispo['Climat']:
+        future_start = derniere_date_reelle + timedelta(days=1)
+        future_end = derniere_date_reelle + timedelta(days=n_weeks_pred * 7)
 
-st.info(f"📆 Dernière semaine de données : S{derniere_semaine_reelle_epi:02d} ({derniere_annee_reelle})")
-st.info(f"🔮 Prédiction : S{derniere_semaine_reelle_epi+1:02d} à S{(derniere_semaine_reelle_epi+n_weeks_pred-1) % 52 + 1:02d}")
-
-future_climate = None
-if donnees_dispo["Climat"]:
-    future_start = end_date + timedelta(days=1)
-    future_end = end_date + timedelta(days=n_weeks_pred * 7)
     
     with st.spinner("🌡️ Chargement prévisions climatiques..."):
         try:
