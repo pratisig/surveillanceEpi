@@ -1550,3 +1550,716 @@ with tab2:
     </div>"""
     m.get_root().html.add_child(folium.Element(legend_html))
     st_folium(m, width=1400, height=650, key="carte_principale_rougeole")
+# ============================================================
+# TAB 3 — MODÉLISATION PRÉDICTIVE (RESTAURÉE + CORRECTIONS)
+# ============================================================
+with tab3:
+    st.header("🔮 Modélisation Prédictive par Semaines Épidémiologiques")
+
+    # CORRECTION 7 : génération semaines futures STRICTEMENT après dernière semaine observée
+    def generer_semaines_futures(derniere_sem, derniere_an, n_weeks):
+        futures = []
+        sem, an = derniere_sem, derniere_an
+        for _ in range(n_weeks):
+            sem += 1
+            if sem > 52:
+                sem = 1
+                an += 1
+            futures.append({
+                "Semaine_Label": f"{an}-S{sem:02d}",
+                "Semaine_Epi":   sem,
+                "Annee":         an,
+                "sort_key":      an * 100 + sem
+            })
+        return futures
+
+    st.markdown(f"""
+    <div class="info-box">
+    <b>Configuration de la prédiction :</b><br>
+    - Dernière semaine de données : <b>S{derniere_semaine_epi:02d} ({derniere_annee})</b><br>
+    - Période de prédiction : <b>{pred_mois} mois ({n_weeks_pred} semaines)</b><br>
+    - Modèle sélectionné : <b>{modele_choisi}</b><br>
+    - Mode importance : <b>{mode_importance}</b><br>
+    - Seuils configurés : Baisse ≥{seuil_baisse}%, Hausse ≥{seuil_hausse}%
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button("🚀 Lancer la Modélisation Prédictive", type="primary",
+                     use_container_width=True, key="btn_model_rougeole"):
+            st.session_state.prediction_rougeole_lancee = True
+    with col2:
+        if st.button("🔄 Réinitialiser", use_container_width=True, key="btn_reset_rougeole"):
+            st.session_state.prediction_rougeole_lancee = False
+
+    if not st.session_state.prediction_rougeole_lancee:
+        st.info("👆 Cliquez sur le bouton ci-dessus pour lancer la modélisation")
+        st.stop()
+
+    with st.spinner("🤖 Préparation des données et entraînement..."):
+
+        weekly_features = df.groupby(["Aire_Sante","Annee","Semaine_Epi"]).agg(
+            Cas_Observes=("ID_Cas","count"),
+            Non_Vaccines=("Statut_Vaccinal", lambda x: (x == "Non").mean() * 100),
+            Age_Moyen=("Age_Mois","mean")
+        ).reset_index()
+
+        weekly_features['Semaine_Label'] = (
+            weekly_features['Annee'].astype(str) + '-S' +
+            weekly_features['Semaine_Epi'].astype(str).str.zfill(2)
+        )
+        weekly_features['sort_key'] = weekly_features['Annee'] * 100 + weekly_features['Semaine_Epi']
+
+        weekly_features = weekly_features.merge(
+            sa_gdf_enrichi[[
+                "health_area","Pop_Totale","Pop_Enfants",
+                "Densite_Pop","Densite_Enfants","Urbanisation",
+                "Temperature_Moy","Humidite_Moy","Saison_Seche_Humidite",
+                "Taux_Vaccination"
+            ]],
+            left_on="Aire_Sante", right_on="health_area", how="left"
+        )
+
+        weekly_features['Age_Moyen'] = weekly_features['Age_Moyen'].fillna(
+            weekly_features['Age_Moyen'].median() if weekly_features['Age_Moyen'].notna().any() else 0)
+        weekly_features['Non_Vaccines'] = weekly_features['Non_Vaccines'].fillna(
+            weekly_features['Non_Vaccines'].mean() if weekly_features['Non_Vaccines'].notna().any() else 50.0)
+
+        le_urban = LabelEncoder()
+        weekly_features["Urban_Encoded"] = le_urban.fit_transform(
+            weekly_features["Urbanisation"].fillna("Rural"))
+
+        if donnees_dispo["Climat"]:
+            scaler_climat = MinMaxScaler()
+            climate_cols = ["Temperature_Moy","Humidite_Moy","Saison_Seche_Humidite"]
+            for col in climate_cols:
+                if col in weekly_features.columns:
+                    col_mean = weekly_features[col].mean()
+                    weekly_features[col] = weekly_features[col].fillna(col_mean if not pd.isna(col_mean) else 0)
+            climate_scaled = scaler_climat.fit_transform(weekly_features[climate_cols].values)
+            for idx_c, col in enumerate(climate_cols):
+                weekly_features[f"{col}_Norm"] = climate_scaled[:, idx_c]
+            weekly_features["Coef_Climatique"] = (
+                weekly_features.get("Temperature_Moy_Norm", 0) * 0.4 +
+                weekly_features.get("Humidite_Moy_Norm", 0) * 0.4 +
+                weekly_features.get("Saison_Seche_Humidite_Norm", 0) * 0.2
+            )
+
+        weekly_features = weekly_features.sort_values(['Aire_Sante','Annee','Semaine_Epi'])
+        for lag in [1,2,3,4]:
+            weekly_features[f'Cas_Lag_{lag}'] = (
+                weekly_features.groupby('Aire_Sante')['Cas_Observes'].shift(lag))
+
+        numeric_cols = weekly_features.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            weekly_features[col] = weekly_features[col].replace([np.inf,-np.inf], np.nan)
+            col_mean = weekly_features[col].mean()
+            weekly_features[col] = weekly_features[col].fillna(col_mean if not pd.isna(col_mean) else 0)
+
+        st.subheader("📚 Entraînement du Modèle")
+
+        feature_cols = ["Cas_Observes","Age_Moyen","Semaine_Epi",
+                        "Cas_Lag_1","Cas_Lag_2","Cas_Lag_3","Cas_Lag_4"]
+
+        feature_groups = {
+            "Historique_Cas": ["Cas_Lag_1","Cas_Lag_2","Cas_Lag_3","Cas_Lag_4"],
+            "Vaccination": [], "Demographie": [], "Urbanisation": [], "Climat": []
+        }
+
+        if donnees_dispo["Population"]:
+            feature_cols.extend(["Pop_Totale","Pop_Enfants","Densite_Pop","Densite_Enfants"])
+            feature_groups["Demographie"] = ["Pop_Totale","Pop_Enfants","Densite_Pop","Densite_Enfants"]
+            st.info("✅ Données démographiques intégrées au modèle")
+        if donnees_dispo["Urbanisation"]:
+            feature_cols.append("Urban_Encoded")
+            feature_groups["Urbanisation"] = ["Urban_Encoded"]
+            st.info("✅ Classification urbaine intégrée au modèle")
+        if donnees_dispo["Climat"]:
+            feature_cols.append("Coef_Climatique")
+            feature_groups["Climat"] = ["Coef_Climatique"]
+            st.info("✅ Coefficient climatique composite intégré au modèle")
+        if donnees_dispo["Vaccination"]:
+            feature_cols.extend(["Taux_Vaccination","Non_Vaccines"])
+            feature_groups["Vaccination"] = ["Taux_Vaccination","Non_Vaccines"]
+            st.info("✅ Données vaccinales intégrées au modèle")
+        elif "Non_Vaccines" in weekly_features.columns:
+            feature_cols.append("Non_Vaccines")
+            feature_groups["Vaccination"] = ["Non_Vaccines"]
+
+        st.markdown(f"**Variables utilisées :** {len(feature_cols)} features")
+
+        for col in feature_cols:
+            weekly_features[col] = weekly_features[col].fillna(0)
+
+        weekly_features_clean = weekly_features.dropna(subset=feature_cols)
+        if len(weekly_features_clean) < 20:
+            st.warning("⚠️ Données insuffisantes (minimum 20 observations requises)")
+            st.stop()
+
+        X = weekly_features_clean[feature_cols].copy().fillna(0)
+        y = weekly_features_clean["Cas_Observes"].copy().fillna(0)
+
+        if mode_importance == "👨‍⚕️ Manuel (Expert)":
+            st.markdown('<div class="weight-box">', unsafe_allow_html=True)
+            st.markdown("**⚖️ Application des poids manuels aux variables**")
+            column_weights = {}
+            for group_name, weight in poids_normalises.items():
+                if group_name in feature_groups:
+                    cols_in_group = feature_groups[group_name]
+                    if len(cols_in_group) > 0:
+                        weight_per_col = weight / len(cols_in_group)
+                        for col in cols_in_group:
+                            if col in feature_cols:
+                                column_weights[col] = weight_per_col
+            for col in feature_cols:
+                if col not in column_weights:
+                    column_weights[col] = 0.01
+            X_weighted = X.copy()
+            for col in feature_cols:
+                if col in column_weights:
+                    X_weighted[col] = X_weighted[col] * column_weights[col]
+            weights_df = pd.DataFrame({
+                "Variable": list(column_weights.keys()),
+                "Poids": [f"{v*100:.1f}%" for v in column_weights.values()]
+            })
+            st.dataframe(weights_df, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            X_to_fit = X_weighted
+        else:
+            X_to_fit = X
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_to_fit)
+        X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Choix du modèle
+        if "GradientBoosting" in modele_choisi:
+            model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+        elif "RandomForest" in modele_choisi:
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+        elif "Ridge" in modele_choisi:
+            model = Ridge(alpha=1.0)
+        elif "Lasso" in modele_choisi:
+            model = Lasso(alpha=1.0)
+        else:
+            model = DecisionTreeRegressor(max_depth=5, random_state=42)
+
+        model.fit(X_scaled, y)
+
+        # Cross-validation
+        try:
+            cv_scores = cross_val_score(model, X_scaled, y, cv=min(5, len(X_scaled)//4), scoring='r2')
+            cv_mean = cv_scores.mean()
+            cv_std  = cv_scores.std()
+            col1, col2, col3 = st.columns(3)
+            with col1: st.metric("R² (CV)", f"{cv_mean:.3f}")
+            with col2: st.metric("Écart-type CV", f"{cv_std:.3f}")
+            with col3: st.metric("Observations", f"{len(X_scaled):,}")
+        except Exception:
+            cv_std = 0.1
+
+        # Importance des variables (mode automatique)
+        if mode_importance == "🤖 Automatique (ML)" and hasattr(model, 'feature_importances_'):
+            importances = model.feature_importances_
+            importance_df = pd.DataFrame({
+                'Variable': feature_cols,
+                'Importance': importances
+            }).sort_values('Importance', ascending=False)
+            fig_imp = px.bar(importance_df, x='Importance', y='Variable', orientation='h',
+                title='Importance des variables (ML)', color='Importance',
+                color_continuous_scale='Blues')
+            st.plotly_chart(fig_imp, use_container_width=True)
+
+        # ── CORRECTION 7 : Prédictions futures STRICTEMENT après dernière semaine ──
+        semaines_futures = generer_semaines_futures(derniere_semaine_epi, derniere_annee, n_weeks_pred)
+        aires_to_predict = weekly_features_clean["Aire_Sante"].unique()
+
+        future_predictions = []
+        progress_bar = st.progress(0)
+        status_text  = st.empty()
+
+        for i_aire, aire in enumerate(aires_to_predict):
+            progress_bar.progress((i_aire + 1) / len(aires_to_predict))
+            status_text.text(f"Prédiction : {aire} ({i_aire+1}/{len(aires_to_predict)})")
+
+            aire_data = weekly_features_clean[weekly_features_clean["Aire_Sante"] == aire].sort_values("sort_key")
+            if len(aire_data) == 0:
+                continue
+
+            last_obs       = aire_data.iloc[-1]
+            last_4_weeks   = aire_data['Cas_Observes'].values[-4:].tolist()
+            while len(last_4_weeks) < 4:
+                last_4_weeks = [last_4_weeks[0]] + last_4_weeks
+
+            aire_info = sa_gdf_enrichi[sa_gdf_enrichi["health_area"] == aire]
+            aire_static = {}
+            if len(aire_info) > 0:
+                r = aire_info.iloc[0]
+                for col in feature_cols:
+                    if col in r.index:
+                        aire_static[col] = r[col] if pd.notna(r[col]) else 0
+
+            for j_week, sem_info in enumerate(semaines_futures):
+                future_row = dict(last_obs)
+                future_row["Aire_Sante"]   = aire
+                future_row["Semaine_Epi"]  = sem_info["Semaine_Epi"]
+                future_row["Annee"]        = sem_info["Annee"]
+                future_row["Semaine_Label"]= sem_info["Semaine_Label"]
+                future_row["sort_key"]     = sem_info["sort_key"]
+
+                # Lags depuis prédictions précédentes
+                prev_preds = [p["Predicted_Cases"] for p in future_predictions if p["Aire_Sante"] == aire]
+
+                if j_week == 0:
+                    future_row["Cas_Lag_1"] = last_4_weeks[-1]
+                    future_row["Cas_Lag_2"] = last_4_weeks[-2] if len(last_4_weeks) >= 2 else last_4_weeks[-1]
+                    future_row["Cas_Lag_3"] = last_4_weeks[-3] if len(last_4_weeks) >= 3 else last_4_weeks[-1]
+                    future_row["Cas_Lag_4"] = last_4_weeks[-4] if len(last_4_weeks) >= 4 else last_4_weeks[-1]
+                else:
+                    future_row["Cas_Observes"] = prev_preds[-1] if prev_preds else last_obs["Cas_Observes"]
+                    future_row["Cas_Lag_1"] = prev_preds[-1] if len(prev_preds) >= 1 else last_4_weeks[-1]
+                    future_row["Cas_Lag_2"] = prev_preds[-2] if len(prev_preds) >= 2 else last_4_weeks[-2]
+                    future_row["Cas_Lag_3"] = prev_preds[-3] if len(prev_preds) >= 3 else last_4_weeks[-3]
+                    future_row["Cas_Lag_4"] = prev_preds[-4] if len(prev_preds) >= 4 else last_4_weeks[-4]
+
+                X_future_values = []
+                for col in feature_cols:
+                    val = future_row.get(col, aire_static.get(col, 0))
+                    if pd.isna(val):
+                        val = 0
+                    X_future_values.append(float(val))
+
+                X_future = np.array([X_future_values])
+                if mode_importance == "👨‍⚕️ Manuel (Expert)":
+                    for idx_c, col in enumerate(feature_cols):
+                        if col in column_weights:
+                            X_future[0, idx_c] *= column_weights[col]
+
+                X_future = np.nan_to_num(X_future, nan=0.0)
+                X_future_scaled = scaler.transform(X_future)
+                X_future_scaled = np.nan_to_num(X_future_scaled, nan=0.0)
+
+                predicted_cases = max(0, model.predict(X_future_scaled)[0])
+                if cv_std > 0:
+                    noise = np.random.normal(0, predicted_cases * cv_std * 0.1)
+                    predicted_cases = max(0, predicted_cases + noise)
+
+                future_row["Predicted_Cases"] = predicted_cases
+                future_predictions.append(future_row)
+
+        progress_bar.empty()
+        status_text.empty()
+
+        future_df = pd.DataFrame(future_predictions)
+        future_df['Predicted_Cases'] = future_df['Predicted_Cases'].round(0).astype(int)
+
+        st.success(f"✓ {len(future_df)} prédictions générées ({len(aires_to_predict)} aires × {n_weeks_pred} semaines)")
+
+        moyenne_historique = weekly_features.groupby("Aire_Sante")["Cas_Observes"].mean().reset_index()
+        moyenne_historique.columns = ["Aire_Sante","Moyenne_Historique"]
+
+        risk_df = future_df.groupby("Aire_Sante").agg(
+            Cas_Predits_Total=("Predicted_Cases","sum"),
+            Cas_Predits_Max=("Predicted_Cases","max"),
+            Cas_Predits_Moyen=("Predicted_Cases","mean"),
+            Semaine_Pic=("Predicted_Cases", lambda x: future_df.loc[x.idxmax(),"Semaine_Label"] if len(x) > 0 else "N/A")
+        ).reset_index()
+
+        risk_df['Cas_Predits_Total'] = risk_df['Cas_Predits_Total'].round(0).astype(int)
+        risk_df['Cas_Predits_Max']   = risk_df['Cas_Predits_Max'].round(0).astype(int)
+        risk_df['Cas_Predits_Moyen'] = risk_df['Cas_Predits_Moyen'].round(1)
+        risk_df = risk_df.merge(moyenne_historique, on="Aire_Sante", how="left")
+
+        risk_df["Variation_Pct"] = (
+            (risk_df["Cas_Predits_Moyen"] - risk_df["Moyenne_Historique"]) /
+            risk_df["Moyenne_Historique"].replace(0, 1)
+        ) * 100
+
+        risk_df["Categorie_Variation"] = pd.cut(
+            risk_df["Variation_Pct"],
+            bins=[-np.inf, -seuil_baisse, -10, 10, seuil_hausse, np.inf],
+            labels=["Forte baisse","Baisse modérée","Stable","Hausse modérée","Forte hausse"]
+        )
+        risk_df = risk_df.sort_values("Variation_Pct", ascending=False)
+
+        # ── KPI prédictions ───────────────────────────────────
+        st.subheader("📊 KPI Prédictions")
+        kp1, kp2, kp3, kp4 = st.columns(4)
+        with kp1:
+            st.metric("🔮 Total cas prédits", f"{risk_df['Cas_Predits_Total'].sum():,}")
+        with kp2:
+            n_hausse = (risk_df['Categorie_Variation'].isin(['Forte hausse','Hausse modérée'])).sum()
+            st.metric("📈 Aires en hausse", f"{n_hausse}")
+        with kp3:
+            n_baisse = (risk_df['Categorie_Variation'].isin(['Forte baisse','Baisse modérée'])).sum()
+            st.metric("📉 Aires en baisse", f"{n_baisse}")
+        with kp4:
+            aire_pic = risk_df.loc[risk_df['Cas_Predits_Total'].idxmax(),'Aire_Sante'] if len(risk_df) > 0 else "N/A"
+            st.metric("🔴 Aire la + à risque", aire_pic)
+
+        # ── Tableau de synthèse ───────────────────────────────
+        st.subheader("📊 Tableau de Synthèse des Prédictions")
+        st.dataframe(
+            risk_df.style.format({
+                'Cas_Predits_Total': '{:.0f}', 'Cas_Predits_Max': '{:.0f}',
+                'Cas_Predits_Moyen': '{:.1f}', 'Moyenne_Historique': '{:.1f}',
+                'Variation_Pct': '{:.1f}%'
+            }), use_container_width=True
+        )
+
+        # ── Top 10 ─────────────────────────────────────────────
+        st.subheader("📈 Top 10 Aires à Risque")
+        top_risk = risk_df.head(10)
+        fig_top = px.bar(top_risk, x='Cas_Predits_Total', y='Aire_Sante', orientation='h',
+            title='Top 10 Aires à Risque (Cas prédits totaux)',
+            labels={'Cas_Predits_Total':'Cas prédits','Aire_Sante':'Aire de santé'},
+            color='Variation_Pct', color_continuous_scale='RdYlGn_r')
+        st.plotly_chart(fig_top, use_container_width=True)
+
+        # ── Timeline prédictions par aire (RESTAURÉ) ──────────
+        st.subheader("📅 Timeline des Prédictions")
+        aires_pred = sorted(future_df["Aire_Sante"].unique().tolist())
+        aire_sel = st.selectbox("Sélectionner une aire de santé", aires_pred, key="aire_timeline_pred")
+
+        df_pred_aire = future_df[future_df["Aire_Sante"] == aire_sel].sort_values("sort_key")
+        df_hist_aire = weekly_features[weekly_features["Aire_Sante"] == aire_sel].sort_values("sort_key")
+
+        fig_timeline = go.Figure()
+        if len(df_hist_aire) > 0:
+            fig_timeline.add_trace(go.Scatter(
+                x=df_hist_aire["Semaine_Label"], y=df_hist_aire["Cas_Observes"],
+                mode="lines+markers", name="Historique",
+                line=dict(color="#2c3e50", width=2), marker=dict(size=5)
+            ))
+        if len(df_pred_aire) > 0:
+            fig_timeline.add_trace(go.Scatter(
+                x=df_pred_aire["Semaine_Label"], y=df_pred_aire["Predicted_Cases"],
+                mode="lines+markers", name="Prédictions",
+                line=dict(color="#e74c3c", width=2, dash="dash"),
+                marker=dict(size=6, symbol="diamond"),
+                fill="tozeroy", fillcolor="rgba(231,76,60,0.08)"
+            ))
+            if len(df_hist_aire) > 0:
+                fig_timeline.add_vline(
+                    x=df_hist_aire["Semaine_Label"].iloc[-1],
+                    line_dash="dot", line_color="grey", line_width=1.5,
+                    annotation_text="Fin données", annotation_position="top"
+                )
+        fig_timeline.update_layout(
+            title=f"Historique + Prédictions — {aire_sel}",
+            xaxis_title="Semaine épidémiologique", yaxis_title="Nombre de cas",
+            height=420, template="plotly_white",
+            xaxis=dict(tickangle=-45, nticks=25),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
+        )
+        st.plotly_chart(fig_timeline, use_container_width=True)
+
+        # ── CORRECTION 3 : Heatmap des PRÉDICTIONS (pas des données épidémio) ──
+        st.subheader("🗓️ Heatmap Hebdomadaire des Prédictions")
+        heatmap_data = future_df.pivot_table(
+            values='Predicted_Cases', index='Aire_Sante',
+            columns='Semaine_Label', aggfunc='sum', fill_value=0
+        )
+        heatmap_data = heatmap_data.round(0).astype(int)
+        # Trier les aires par total décroissant
+        heatmap_data['_total'] = heatmap_data.sum(axis=1)
+        heatmap_data = heatmap_data.sort_values('_total', ascending=False).drop(columns='_total')
+
+        h_heat = max(400, min(1200, len(heatmap_data) * 22))
+        fig_heatmap = go.Figure(go.Heatmap(
+            z=heatmap_data.values,
+            x=list(heatmap_data.columns),
+            y=list(heatmap_data.index),
+            colorscale=[
+                [0.0,  "rgb(255,255,255)"],
+                [0.05, "rgb(255,245,220)"],
+                [0.20, "rgb(255,200,100)"],
+                [0.40, "rgb(255,140,40)"],
+                [0.65, "rgb(220,50,20)"],
+                [0.85, "rgb(170,0,0)"],
+                [1.0,  "rgb(80,0,0)"],
+            ],
+            colorbar=dict(title="Cas prédits", thickness=15),
+            hoverongaps=False,
+            hovertemplate="<b>%{y}</b><br>Semaine : %{x}<br>Cas prédits : %{z}<extra></extra>",
+        ))
+        fig_heatmap.update_layout(
+            title=f"Prédictions par Aire et par Semaine ({n_weeks_pred} semaines)",
+            xaxis_title="Semaine", yaxis_title="Aire de Santé",
+            height=h_heat, template="plotly_white",
+            xaxis=dict(tickangle=-60, tickfont=dict(size=9)),
+            yaxis=dict(tickfont=dict(size=10), autorange="reversed"),
+            margin=dict(l=160, r=80, t=60, b=120)
+        )
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+
+        # ── CARTE PRÉDICTIONS RESTAURÉE (complète avec popups) ─
+        st.subheader("🗺️ Cartographie des Prédictions")
+
+        gdf_predictions = sa_gdf_enrichi.merge(
+            risk_df[['Aire_Sante','Cas_Predits_Total','Cas_Predits_Max','Variation_Pct','Categorie_Variation','Semaine_Pic']],
+            left_on='health_area', right_on='Aire_Sante', how='left'
+        )
+        gdf_predictions['Cas_Predits_Total']    = gdf_predictions['Cas_Predits_Total'].fillna(0).astype(int)
+        gdf_predictions['Cas_Predits_Max']      = gdf_predictions['Cas_Predits_Max'].fillna(0).astype(int)
+        gdf_predictions['Variation_Pct']        = gdf_predictions['Variation_Pct'].fillna(0)
+        gdf_predictions['Categorie_Variation']  = gdf_predictions['Categorie_Variation'].fillna('Stable')
+        gdf_predictions['Semaine_Pic']          = gdf_predictions['Semaine_Pic'].fillna('N/A')
+
+        center_lat_p = gdf_predictions.geometry.centroid.y.mean()
+        center_lon_p = gdf_predictions.geometry.centroid.x.mean()
+
+        m_predictions = folium.Map(location=[center_lat_p, center_lon_p],
+                                   zoom_start=6, tiles='CartoDB positron')
+
+        folium.Choropleth(
+            geo_data=gdf_predictions, data=gdf_predictions,
+            columns=['health_area','Cas_Predits_Total'],
+            key_on='feature.properties.health_area',
+            fill_color='YlOrRd', fill_opacity=0.7, line_opacity=0.2,
+            legend_name=f'Cas prédits totaux ({n_weeks_pred} semaines)',
+            name='Cas prédits totaux'
+        ).add_to(m_predictions)
+
+        folium.Choropleth(
+            geo_data=gdf_predictions, data=gdf_predictions,
+            columns=['health_area','Variation_Pct'],
+            key_on='feature.properties.health_area',
+            fill_color='RdYlGn_r', fill_opacity=0.7, line_opacity=0.2,
+            legend_name='Variation (%) vs moyenne historique',
+            name='Variation (%)', show=False
+        ).add_to(m_predictions)
+
+        for idx, row in gdf_predictions.iterrows():
+            cat = str(row['Categorie_Variation'])
+            if cat == 'Forte hausse':     color, icon = 'red',        'arrow-up'
+            elif cat == 'Hausse modérée': color, icon = 'orange',     'arrow-up'
+            elif cat == 'Stable':         color, icon = 'blue',       'minus'
+            elif cat == 'Baisse modérée': color, icon = 'lightgreen', 'arrow-down'
+            else:                         color, icon = 'green',      'arrow-down'
+
+            popup_html = f"""
+            <div style="width:350px;font-family:Arial;font-size:13px;">
+              <h4 style="color:#E4032E;margin:0;padding-bottom:8px;border-bottom:2px solid #E4032E;">
+                {row['health_area']}</h4>
+              <table style="width:100%;margin-top:10px;border-collapse:collapse;">
+                <tr style="background:#f9f9f9;">
+                  <td style="padding:6px;font-weight:bold;">🔮 Cas prédits (total)</td>
+                  <td style="padding:6px;text-align:right;">{row['Cas_Predits_Total']}</td></tr>
+                <tr>
+                  <td style="padding:6px;font-weight:bold;">📈 Cas max (semaine)</td>
+                  <td style="padding:6px;text-align:right;">{row['Cas_Predits_Max']}</td></tr>
+                <tr style="background:#f9f9f9;">
+                  <td style="padding:6px;font-weight:bold;">📅 Semaine pic</td>
+                  <td style="padding:6px;text-align:right;">{row['Semaine_Pic']}</td></tr>
+                <tr>
+                  <td style="padding:6px;font-weight:bold;">📊 Variation</td>
+                  <td style="padding:6px;text-align:right;color:{'red' if row['Variation_Pct'] > 0 else 'green'};">
+                    {row['Variation_Pct']:.1f}%</td></tr>
+                <tr style="background:#f0f0f0;">
+                  <td colspan="2" style="padding:6px;text-align:center;font-weight:bold;">{cat}</td></tr>
+              </table>
+            </div>"""
+
+            radius = min(5 + row['Cas_Predits_Total'] / 10, 25)
+            folium.CircleMarker(
+                location=[row.geometry.centroid.y, row.geometry.centroid.x],
+                radius=radius,
+                popup=folium.Popup(popup_html, max_width=400),
+                color=color, fill=True, fillColor=color, fillOpacity=0.7, weight=2
+            ).add_to(m_predictions)
+
+        folium.LayerControl().add_to(m_predictions)
+        st_folium(m_predictions, width=1200, height=600, key='carte_predictions_rougeole')
+
+        st.markdown(f"""
+        <div style="background:#f0f2f6;padding:1rem;border-radius:8px;margin-top:1rem;">
+        <b>🎨 Légende des catégories :</b><br>
+        🔴 <b>Forte hausse</b> : Variation ≥{seuil_hausse}% (Action urgente requise)<br>
+        🟠 <b>Hausse modérée</b> : Variation entre 10% et {seuil_hausse}%<br>
+        🔵 <b>Stable</b> : Variation entre -10% et +10%<br>
+        🟡 <b>Baisse modérée</b> : Variation entre -{seuil_baisse}% et -10%<br>
+        🟢 <b>Forte baisse</b> : Variation ≤-{seuil_baisse}%
+        </div>""", unsafe_allow_html=True)
+
+        # ── Carte zones à risque élevé ─────────────────────────
+        st.subheader("🎯 Carte des Zones à Risque Élevé")
+        aires_critiques = gdf_predictions[gdf_predictions['Categorie_Variation'] == 'Forte hausse']
+        if len(aires_critiques) > 0:
+            m_risque = folium.Map(location=[center_lat_p, center_lon_p],
+                                  zoom_start=6, tiles='CartoDB positron')
+            folium.GeoJson(gdf_predictions,
+                style_function=lambda x: {'fillColor':'#e0e0e0','color':'#999999','weight':1,'fillOpacity':0.3},
+                name='Toutes les aires').add_to(m_risque)
+            for idx, row in aires_critiques.iterrows():
+                folium.GeoJson(row.geometry,
+                    style_function=lambda x: {'fillColor':'#ff0000','color':'#8B0000','weight':3,'fillOpacity':0.6}
+                ).add_to(m_risque)
+                folium.Marker(
+                    location=[row.geometry.centroid.y, row.geometry.centroid.x],
+                    popup=folium.Popup(f"""
+                    <div style="width:250px;font-family:Arial;">
+                      <h4 style="color:red;margin:0;">⚠️ ALERTE</h4>
+                      <p><b>{row['health_area']}</b></p>
+                      <p>Cas prédits : <b>{row['Cas_Predits_Total']}</b></p>
+                      <p>Hausse : <b style="color:red;">+{row['Variation_Pct']:.1f}%</b></p>
+                      <p>Pic : <b>{row['Semaine_Pic']}</b></p>
+                    </div>""", max_width=300),
+                    icon=folium.Icon(color='red', icon='exclamation-triangle', prefix='fa')
+                ).add_to(m_risque)
+            st_folium(m_risque, width=1200, height=600, key='carte_risque_rougeole')
+            st.error(f"🚨 **{len(aires_critiques)} aires identifiées à risque élevé** - Intervention prioritaire recommandée")
+        else:
+            st.success("✅ Aucune zone à risque élevé identifiée dans les prédictions")
+
+        # ── Carte de chaleur prédictions ─────────────────────
+        if gdf_predictions['Cas_Predits_Total'].sum() > 100:
+            st.subheader("🔥 Carte de Chaleur des Cas Prédits")
+            heat_data_pred = [[row.geometry.centroid.y, row.geometry.centroid.x, row['Cas_Predits_Total']]
+                            for idx, row in gdf_predictions.iterrows()
+                if row['Cas_Predits_Total'] > 0]
+
+        if len(heat_data_pred) > 0:
+            m_heat = folium.Map(
+                location=[center_lat_p, center_lon_p],
+                zoom_start=6,
+                tiles='CartoDB positron'
+            )
+            HeatMap(
+                heat_data_pred,
+                min_opacity=0.3,
+                max_opacity=0.8,
+                radius=25,
+                blur=20,
+                gradient={
+                    0.0: 'blue',
+                    0.3: 'lime',
+                    0.5: 'yellow',
+                    0.7: 'orange',
+                    1.0: 'red'
+                }
+            ).add_to(m_heat)
+
+            st_folium(m_heat, width=1200, height=600, key='heatmap_chaleur_pred_rougeole')
+            st.info("💡 Les zones rouges/oranges indiquent les concentrations de cas prédits les plus élevées")
+
+    # ============================================================
+    # ALERTES ET RECOMMANDATIONS
+    # ============================================================
+
+    st.subheader("🚨 Alertes et Recommandations")
+
+    forte_hausse = risk_df[risk_df['Categorie_Variation'] == 'Forte hausse']
+
+    if len(forte_hausse) > 0:
+        st.error(f"⚠️ **{len(forte_hausse)} aires en FORTE HAUSSE** (≥{seuil_hausse}%)")
+
+        with st.expander("📋 Détails des aires critiques", expanded=True):
+            st.dataframe(
+                forte_hausse[['Aire_Sante', 'Cas_Predits_Total', 'Variation_Pct', 'Semaine_Pic']]
+                .style.format({
+                    'Cas_Predits_Total': '{:.0f}',
+                    'Variation_Pct': '{:.1f}%'
+                }),
+                use_container_width=True
+            )
+
+            st.markdown("**🎯 Actions recommandées :**")
+            st.markdown("- Intensifier la surveillance épidémiologique")
+            st.markdown("- Préparer campagne de vaccination réactive (CVR)")
+            st.markdown("- Renforcer stocks de vaccins et intrants")
+            st.markdown("- Communication précoce aux équipes terrain")
+    else:
+        st.success("✅ Aucune aire en forte hausse détectée")
+
+    forte_baisse = risk_df[risk_df['Categorie_Variation'] == 'Forte baisse']
+
+    if len(forte_baisse) > 0:
+        st.success(f"✅ **{len(forte_baisse)} aires en FORTE BAISSE** (≥{seuil_baisse}%)")
+
+        with st.expander("📋 Aires en amélioration"):
+            st.dataframe(
+                forte_baisse[['Aire_Sante', 'Cas_Predits_Total', 'Variation_Pct']]
+                .style.format({
+                    'Cas_Predits_Total': '{:.0f}',
+                    'Variation_Pct': '{:.1f}%'
+                }),
+                use_container_width=True
+            )
+
+    # ============================================================
+    # TÉLÉCHARGEMENTS
+    # ============================================================
+
+    st.subheader("💾 Téléchargements")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        csv_predictions = future_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Prédictions détaillées (CSV)",
+            data=csv_predictions,
+            file_name=f"predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="dl_pred_csv"
+        )
+
+    with col2:
+        csv_synthese = risk_df.to_csv(index=False)
+        st.download_button(
+            label="📊 Synthèse par aire (CSV)",
+            data=csv_synthese,
+            file_name=f"synthese_risque_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="dl_synth_csv"
+        )
+
+    with col3:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            risk_df.to_excel(writer, sheet_name='Synthèse', index=False)
+            future_df.to_excel(writer, sheet_name='Prédictions détaillées', index=False)
+            heatmap_data.to_excel(writer, sheet_name='Heatmap')
+
+        st.download_button(
+            label="📊 Rapport complet (Excel)",
+            data=output.getvalue(),
+            file_name=f"rapport_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="dl_rapport_excel"
+        )
+
+    # Export GeoJSON
+    col4, col5, col6 = st.columns(3)
+
+    with col4:
+        geojson_predictions = gdf_predictions.to_json()
+        st.download_button(
+            label="🗺️ Carte prédictions (GeoJSON)",
+            data=geojson_predictions,
+            file_name=f"carte_predictions_rougeole_{datetime.now().strftime('%Y%m%d')}.geojson",
+            mime="application/json",
+            use_container_width=True,
+            key="dl_geojson_pred"
+        )
+
+    with col5:
+        if len(aires_critiques) > 0:
+            geojson_risque = aires_critiques.to_json()
+            st.download_button(
+                label="⚠️ Zones à risque (GeoJSON)",
+                data=geojson_risque,
+                file_name=f"zones_risque_rougeole_{datetime.now().strftime('%Y%m%d')}.geojson",
+                mime="application/json",
+                use_container_width=True,
+                key="dl_geojson_risque"
+            )
+
+    st.markdown("---")
+    st.success("✅ Modélisation terminée avec succès !")
+    st.info("💡 Ajustez les paramètres dans la sidebar pour relancer une nouvelle prédiction")
