@@ -224,10 +224,14 @@ pays_selectionne = None
 iso3_pays = None
 if option_aire == "Fichier local (ao_hlthArea.zip)":
     pays_selectionne = st.sidebar.selectbox(
-    "🌍 Sélectionner le pays",
-    list(PAYS_ISO3_MAP.keys()),
-    key='pays_select'
-)
+        "🌍 Sélectionner le pays",
+        list(PAYS_ISO3_MAP.keys()),
+        key='pays_select'
+    )
+    iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
+    if st.session_state.pays_precedent != pays_selectionne:
+        st.session_state.pays_precedent = pays_selectionne
+        st.session_state.sa_gdf_cache = None
 iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
 # CORRECTION : on met à jour le cache SANS rerun si le pays change
 if st.session_state.pays_precedent != pays_selectionne:
@@ -1657,10 +1661,7 @@ with tab2:
         <b>⚠️ Seuil alerte :</b> {seuil_alerte_epidemique} cas/sem</p>
     </div>"""
     m.get_root().html.add_child(folium.Element(legend_html))
-
-    st_folium(m, width=1400, height=650,
-          key="carte_situation_actuelle_rougeole",
-          returned_objects=[])
+        st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -1910,8 +1911,12 @@ with tab3:
         if len(aire_meta) > 0:
             pop_enfants_aire  = float(aire_meta["Pop_Enfants"].iloc[0])  if "Pop_Enfants"  in aire_meta.columns else np.nan
             densite_aire      = float(aire_meta["Densite_Pop"].iloc[0])  if "Densite_Pop"  in aire_meta.columns else np.nan
-            urban_enc_aire    = le_urban.transform([str(aire_meta["Urbanisation"].iloc[0]
-                                    if "Urbanisation" in aire_meta.columns else "Rural")])[0]
+            try:
+                urban_enc_aire = le_urban.transform(
+                    [str(aire_meta["Urbanisation"].iloc[0])])[0] \
+                    if "Urbanisation" in aire_meta.columns else 0
+            except ValueError:
+                urban_enc_aire = 0
             taux_vacc_aire    = float(aire_meta["Taux_Vaccination"].iloc[0]) if "Taux_Vaccination" in aire_meta.columns else np.nan
             coef_clim_aire    = float(aire_meta["Humidite_Moy"].iloc[0] * 0.5
                                       if "Humidite_Moy" in aire_meta.columns else 0)
@@ -2096,7 +2101,8 @@ with tab3:
         height=400
     )
 
-    # ── Carte zones à risque élevé ─────────────────────────────
+    # ✅ BLOC COMPLET À REMPLACER (coller tel quel dans with tab3:)
+
     st.subheader("🎯 Carte des Zones à Risque Élevé")
 
     gdf_predictions = sa_gdf_enrichi.merge(risk_df, left_on="health_area",
@@ -2115,34 +2121,90 @@ with tab3:
     aires_critiques = gdf_predictions[gdf_predictions["Categorie_Variation"] == "Forte hausse"]
 
     if len(aires_critiques) > 0:
-        m_risque = folium.Map(location=[center_lat_p, center_lon_p],
-                              zoom_start=6, tiles="CartoDB positron")
-        folium.GeoJson(gdf_predictions,
-            style_function=lambda x: {
-                "fillColor": "#e0e0e0", "color": "#999999",
-                "weight": 1, "fillOpacity": 0.3},
+        m_risque = folium.Map(location=[center_lat_p, center_lon_p], zoom_start=6, tiles="CartoDB positron")
+        folium.GeoJson(gdf_predictions, style_function=lambda x: {
+            "fillColor": "#e0e0e0", "color": "#999999", "weight": 1, "fillOpacity": 0.3},
             name="Toutes les aires").add_to(m_risque)
         for idx, row in aires_critiques.iterrows():
-            folium.GeoJson(row.geometry,
-                style_function=lambda x: {
-                    "fillColor": "#ff0000", "color": "#8B0000",
-                    "weight": 3, "fillOpacity": 0.6}
+            folium.GeoJson(row.geometry, style_function=lambda x: {
+                "fillColor": "#ff0000", "color": "#8B0000", "weight": 3, "fillOpacity": 0.6}
             ).add_to(m_risque)
             folium.Marker(
                 location=[row.geometry.centroid.y, row.geometry.centroid.x],
-                popup=folium.Popup(f"""
-                <div style="width:250px;font-family:Arial;">
-                  <h4 style="color:red;margin:0;">⚠️ ALERTE</h4>
-                  <p><b>{row['health_area']}</b></p>
-                  <p>Cas prédits : <b>{row['Cas_Predits_Total']}</b></p>
-                  <p>Hausse : <b style="color:red;">+{row['Variation_Pct']:.1f}%</b></p>
-                  <p>Pic : <b>{row['Semaine_Pic']}</b></p>
-                </div>""", max_width=300),
+                popup=folium.Popup(
+                    f"""<div style="width:250px;font-family:Arial;">
+                    <h4 style="color:red;margin:0;">⚠️ ALERTE</h4>
+                    <p><b>{row["health_area"]}</b></p>
+                    <p>Cas prédits : <b>{row["Cas_Predits_Total"]}</b></p>
+                    <p>Hausse : <b style="color:red;">{row["Variation_Pct"]:.1f}%</b></p>
+                    <p>Pic : {row["Semaine_Pic"]}</p></div>""", max_width=300),
                 icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")
             ).add_to(m_risque)
-        st_folium(m_risque, width=1200, height=600,
-          key="carte_risque_rougeole",
-          returned_objects=[]
+        st_folium(m_risque, width=1200, height=600, key="carte_risque_rougeole", returned_objects=[])
+        st.error(f"⚠️ {len(aires_critiques)} aires identifiées à risque élevé — Intervention prioritaire recommandée")
+    else:
+        st.success("✅ Aucune zone à risque élevé identifiée dans les prédictions")
+
+    # ── Carte de chaleur des prédictions ──────────────────────
+    heat_data_pred = []
+    if gdf_predictions["Cas_Predits_Total"].sum() > 100:
+        st.subheader("🌡️ Carte de Chaleur des Cas Prédits")
+        heat_data_pred = [
+            [row.geometry.centroid.y, row.geometry.centroid.x, row["Cas_Predits_Total"]]
+            for idx, row in gdf_predictions.iterrows()
+            if row["Cas_Predits_Total"] > 0
+        ]
+        if len(heat_data_pred) > 0:
+            m_heat = folium.Map(location=[center_lat_p, center_lon_p], zoom_start=6, tiles="CartoDB positron")
+            HeatMap(heat_data_pred, min_opacity=0.3, max_opacity=0.8, radius=25, blur=20,
+                    gradient={0.0: "blue", 0.3: "lime", 0.5: "yellow", 0.7: "orange", 1.0: "red"}
+            ).add_to(m_heat)
+            st_folium(m_heat, width=1200, height=600, key="heatmap_chaleur_pred_rougeole", returned_objects=[])
+            st.info("ℹ️ Les zones rouges/oranges indiquent les concentrations de cas prédits les plus élevées")
+
+    # ── Carte choroplèthe des prédictions ─────────────────────
+    st.subheader("🗺️ Cartographie des Prédictions")
+    m_predictions = folium.Map(location=[center_lat_p, center_lon_p], zoom_start=6, tiles="CartoDB positron")
+    folium.Choropleth(
+        geo_data=gdf_predictions, data=gdf_predictions,
+        columns=["health_area", "Cas_Predits_Total"],
+        key_on="feature.properties.health_area",
+        fill_color="YlOrRd", fill_opacity=0.7, line_opacity=0.2,
+        legend_name=f"Cas prédits totaux ({n_weeks_pred} semaines)",
+        name="Cas prédits totaux"
+    ).add_to(m_predictions)
+
+    color_map_cat = {
+        "Forte hausse":  "#f44336",
+        "Légère hausse": "#ff9800",
+        "Stable/baisse": "#4caf50",
+        "Forte baisse":  "#2196f3"
+    }
+    for idx, row in gdf_predictions.iterrows():
+        cat = str(row["Categorie_Variation"])
+        color = color_map_cat.get(cat, "#4caf50")
+        popup_html = f"""<div style="width:350px;font-family:Arial;font-size:13px;">
+            <h4 style="color:#E4032E;margin:0;padding-bottom:8px;border-bottom:2px solid #E4032E;">
+            {row["health_area"]}</h4>
+            <table style="width:100%;margin-top:10px;border-collapse:collapse;">
+            <tr style="background:#f9f9f9;"><td style="padding:6px;font-weight:bold;">Cas prédits total</td>
+            <td style="padding:6px;text-align:right;">{row["Cas_Predits_Total"]}</td></tr>
+            <tr><td style="padding:6px;font-weight:bold;">Variation</td>
+            <td style="padding:6px;text-align:right;color:{'red' if row['Variation_Pct'] > 0 else 'green'};">
+            {row["Variation_Pct"]:.1f}%</td></tr>
+            <tr style="background:#f0f0f0;"><td colspan="2" style="padding:6px;text-align:center;
+            font-weight:bold;">{cat}</td></tr></table></div>"""
+        folium.Marker(
+            location=[row.geometry.centroid.y, row.geometry.centroid.x],
+            popup=folium.Popup(popup_html, max_width=400),
+            icon=folium.Icon(color=color.replace("#f44336", "red").replace(
+                "#ff9800", "orange").replace("#4caf50", "green").replace("#2196f3", "blue"),
+                icon="info-sign")
+        ).add_to(m_predictions)
+
+    folium.LayerControl().add_to(m_predictions)
+    st_folium(m_predictions, width=1200, height=600, key="carte_predictions_rougeole", returned_objects=[])
+
         st.error(f"🚨 **{len(aires_critiques)} aires identifiées à risque élevé** - Intervention prioritaire recommandée")
     else:
         st.success("✅ Aucune zone à risque élevé identifiée dans les prédictions")
