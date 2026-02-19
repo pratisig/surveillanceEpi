@@ -1439,47 +1439,99 @@ with tab1:
     else:
         st.info("📊 Données de population non disponibles. Pyramide des âges non affichable.")
 
-    # ── Nowcasting (inchangé) ─────────────────────────────────
-    st.subheader("⏱️ Nowcasting - Correction des Délais de Notification")
-    st.info("**Nowcasting :** Technique d'ajustement permettant d'estimer le nombre réel de cas en tenant compte des délais de notification.")
-    if "Date_Notification" in df.columns and "Date_Debut_Eruption" in df.columns:
-        df["Delai_Notification"] = (df["Date_Notification"] - df["Date_Debut_Eruption"]).dt.days
-        delai_available = True
+    # ── Nowcasting - Correction des Délais de Notification ────────
+st.subheader("⏱️ Nowcasting - Correction des Délais de Notification")
+st.info("**Nowcasting :** Technique d'ajustement permettant d'estimer le nombre réel "
+        "de cas en tenant compte des délais de notification.")
+
+if "Date_Notification" in df.columns and "Date_Debut_Eruption" in df.columns:
+    # CORRECTION : forcer numérique avant tout calcul
+    delai_raw = (
+        pd.to_datetime(df["Date_Notification"], errors="coerce") -
+        pd.to_datetime(df["Date_Debut_Eruption"], errors="coerce")
+    ).dt.days
+    df["Delai_Notification"] = pd.to_numeric(delai_raw, errors="coerce")
+    delai_available = df["Delai_Notification"].notna().sum() > 0
+else:
+    df["Delai_Notification"] = 3
+    delai_available = False
+
+# CORRECTION : conversion explicite en float natif Python (pas numpy)
+# pour éviter TypeError dans add_vline (Plotly n'accepte pas numpy float)
+_delai_series = pd.to_numeric(df["Delai_Notification"], errors="coerce").dropna()
+
+delai_moyen  = float(_delai_series.mean())   if len(_delai_series) > 0 else float('nan')
+delai_median = float(_delai_series.median()) if len(_delai_series) > 0 else float('nan')
+delai_std    = float(_delai_series.std())    if len(_delai_series) > 0 else float('nan')
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Délai moyen",
+              f"{delai_moyen:.1f} jours" if delai_available and not np.isnan(delai_moyen) else "N/A")
+with col2:
+    st.metric("Délai médian",
+              f"{delai_median:.0f} jours" if delai_available and not np.isnan(delai_median) else "N/A")
+with col3:
+    st.metric("Écart-type",
+              f"{delai_std:.1f} jours" if delai_available and not np.isnan(delai_std) else "N/A")
+with col4:
+    derniere_semaine_label = weekly_cases.iloc[-1]['Semaine_Label']
+    cas_derniere_semaine   = int(weekly_cases.iloc[-1]['Cas'])
+    if delai_available and not np.isnan(delai_moyen):
+        facteur_correction = 1 + (delai_moyen / 7)
+        cas_corriges = int(cas_derniere_semaine * facteur_correction)
+        st.metric(f"Cas corrigés ({derniere_semaine_label})",
+                  cas_corriges, delta=f"+{cas_corriges - cas_derniere_semaine}")
     else:
-        df["Delai_Notification"] = 3
-        delai_available = False
-    delai_moyen  = df["Delai_Notification"].mean()
-    delai_median = df["Delai_Notification"].median()
-    delai_std    = df["Delai_Notification"].std()
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Délai moyen", f"{delai_moyen:.1f} jours" if delai_available and not np.isnan(delai_moyen) else "N/A")
-    with col2:
-        st.metric("Délai médian", f"{delai_median:.0f} jours" if delai_available and not np.isnan(delai_median) else "N/A")
-    with col3:
-        st.metric("Écart-type", f"{delai_std:.1f} jours" if delai_available and not np.isnan(delai_std) else "N/A")
-    with col4:
-        derniere_semaine_label = weekly_cases.iloc[-1]['Semaine_Label']
-        cas_derniere_semaine   = int(weekly_cases.iloc[-1]['Cas'])
-        if delai_available and not np.isnan(delai_moyen):
-            facteur_correction = 1 + (delai_moyen / 7)
-            cas_corriges = int(cas_derniere_semaine * facteur_correction)
-            st.metric(f"Cas corrigés ({derniere_semaine_label})", cas_corriges,
-                      delta=f"+{cas_corriges - cas_derniere_semaine}")
-        else:
-            st.metric(f"Cas corrigés ({derniere_semaine_label})", cas_derniere_semaine, delta="N/A")
-    if delai_available:
-        fig_delai = px.histogram(df, x="Delai_Notification", nbins=20,
+        st.metric(f"Cas corrigés ({derniere_semaine_label})",
+                  cas_derniere_semaine, delta="N/A")
+
+if delai_available and not np.isnan(delai_moyen):
+    # Filtrer les délais valides et raisonnables pour l'histogramme
+    df_delai_plot = df[
+        df["Delai_Notification"].notna() &
+        df["Delai_Notification"].between(-5, 60)
+    ].copy()
+
+    if len(df_delai_plot) > 0:
+        fig_delai = px.histogram(
+            df_delai_plot,
+            x="Delai_Notification",
+            nbins=20,
             title="Distribution des délais de notification",
-            labels={"Delai_Notification":"Délai (jours)","count":"Nombre de cas"},
-            color_discrete_sequence=['#d32f2f'])
-        fig_delai.add_vline(x=delai_moyen, line_dash="dash", line_color="blue",
-                            annotation_text=f"Moyenne : {delai_moyen:.1f}j")
-        fig_delai.add_vline(x=delai_median, line_dash="dash", line_color="green",
-                            annotation_text=f"Médiane : {delai_median:.0f}j")
+            labels={"Delai_Notification": "Délai (jours)", "count": "Nombre de cas"},
+            color_discrete_sequence=['#d32f2f']
+        )
+
+        # CORRECTION : add_vline nécessite float Python pur (pas np.float64)
+        # et l'axe X doit être numérique (histogramme → OK ici)
+        if not np.isnan(delai_moyen):
+            fig_delai.add_vline(
+                x=float(delai_moyen),
+                line_dash="dash", line_color="blue",
+                annotation_text=f"Moyenne : {delai_moyen:.1f}j",
+                annotation_position="top right"
+            )
+        if not np.isnan(delai_median):
+            fig_delai.add_vline(
+                x=float(delai_median),
+                line_dash="dash", line_color="green",
+                annotation_text=f"Médiane : {delai_median:.0f}j",
+                annotation_position="top left"
+            )
+
+        fig_delai.update_layout(
+            xaxis_title="Délai (jours)",
+            yaxis_title="Nombre de cas",
+            template="plotly_white",
+            height=350
+        )
         st.plotly_chart(fig_delai, use_container_width=True)
     else:
-        st.info("ℹ️ Données de délai de notification non disponibles")
+        st.info("ℹ️ Délais de notification non représentables (valeurs hors plage)")
+else:
+    st.info("ℹ️ Données de délai de notification non disponibles")
+
 
 # ============================================================
 # CARTOGRAPHIE DE LA SITUATION ACTUELLE
