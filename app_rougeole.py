@@ -159,19 +159,62 @@ else:
 
 # Période d'analyse
 st.sidebar.subheader("📅 Période d'Analyse")
+
+# Sélection par semaines épidémiologiques
 col1, col2 = st.sidebar.columns(2)
+
 with col1:
-    start_date = st.date_input(
-        "Date début",
-        value=datetime(2024, 1, 1),
-        key='start_date'
+    annee_debut = st.number_input(
+        "Année début",
+        min_value=2000,
+        max_value=datetime.now().year,
+        value=2024,
+        step=1,
+        key="annee_debut"
     )
+    
+    semaine_debut = st.number_input(
+        "Semaine début",
+        min_value=1,
+        max_value=53,
+        value=1,
+        step=1,
+        key="semaine_debut",
+        help="Semaine épidémiologique (1-53)"
+    )
+
 with col2:
-    end_date = st.date_input(
-        "Date fin",
-        value=datetime.today(),
-        key='end_date'
+    annee_fin = st.number_input(
+        "Année fin",
+        min_value=2000,
+        max_value=datetime.now().year,
+        value=datetime.now().year,
+        step=1,
+        key="annee_fin"
     )
+    
+    semaine_fin = st.number_input(
+        "Semaine fin",
+        min_value=1,
+        max_value=53,
+        value=datetime.now().isocalendar().week,
+        step=1,
+        key="semaine_fin",
+        help="Semaine épidémiologique (1-53)"
+    )
+
+# Validation de la période
+if annee_debut > annee_fin:
+    st.sidebar.error("⚠️ L'année de début doit être ≤ année de fin")
+elif annee_debut == annee_fin and semaine_debut > semaine_fin:
+    st.sidebar.error("⚠️ La semaine de début doit être ≤ semaine de fin")
+else:
+    # Calculer le nombre de semaines dans la période
+    nb_annees = annee_fin - annee_debut
+    nb_semaines = (nb_annees * 52) + (semaine_fin - semaine_debut) + 1
+    st.sidebar.success(f"✅ Période : {nb_semaines} semaines")
+    st.sidebar.info(f"📅 S{semaine_debut:02d}/{annee_debut} → S{semaine_fin:02d}/{annee_fin}")
+
 
 # Paramètres de prédiction
 st.sidebar.subheader("🔮 Paramètres de Prédiction")
@@ -857,21 +900,58 @@ if 'Date_Debut_Eruption' in df.columns:
             st.error("❌ La date de début doit être antérieure à la date de fin")
             st.stop()
         
-        # FILTRER LES DONNÉES par la période sélectionnée
-        df_before_filter = len(df)
-        df = df[(df['Date_Debut_Eruption'] >= pd.Timestamp(start_date)) & 
-                (df['Date_Debut_Eruption'] <= pd.Timestamp(end_date))]
-        df_after_filter = len(df)
+        # ============================================================
+        # FILTRAGE PAR SEMAINES ÉPIDÉMIOLOGIQUES
+        # ============================================================
         
-        if df_after_filter == 0:
-            st.error(f"❌ Aucune donnée disponible pour la période {start_date} → {end_date}")
-            st.info(f"Plage disponible : {date_min_data} → {date_max_data}")
+        # Créer les colonnes Annee et Semaine_Epi si elles n'existent pas encore
+        if 'Annee' not in df.columns and 'Date_Debut_Eruption' in df.columns:
+            df['Annee'] = df['Date_Debut_Eruption'].dt.isocalendar().year
+        if 'Semaine_Epi' not in df.columns and 'Date_Debut_Eruption' in df.columns:
+            df['Semaine_Epi'] = df['Date_Debut_Eruption'].dt.isocalendar().week
+        
+        # Vérifier que les colonnes existent
+        if 'Annee' in df.columns and 'Semaine_Epi' in df.columns:
+            
+            # Afficher la plage disponible
+            annee_min_data = df['Annee'].min()
+            annee_max_data = df['Annee'].max()
+            semaine_min_data = df[df['Annee'] == annee_min_data]['Semaine_Epi'].min()
+            semaine_max_data = df[df['Annee'] == annee_max_data]['Semaine_Epi'].max()
+            
+            st.info(f"📅 **Plage de données disponibles :** S{semaine_min_data:02d}/{annee_min_data} → S{semaine_max_data:02d}/{annee_max_data}")
+            
+            # Filtrer par période sélectionnée
+            df_before_filter = len(df)
+            
+            # Créer un identifiant unique pour trier chronologiquement
+            df['Periode_ID'] = df['Annee'] * 100 + df['Semaine_Epi']
+            periode_debut_id = annee_debut * 100 + semaine_debut
+            periode_fin_id = annee_fin * 100 + semaine_fin
+            
+            df = df[(df['Periode_ID'] >= periode_debut_id) & (df['Periode_ID'] <= periode_fin_id)]
+            df = df.drop(columns=['Periode_ID'])  # Supprimer la colonne temporaire
+            
+            df_after_filter = len(df)
+            
+            if df_after_filter == 0:
+                st.error(f"❌ Aucune donnée disponible pour la période S{semaine_debut:02d}/{annee_debut} → S{semaine_fin:02d}/{annee_fin}")
+                st.info(f"Plage disponible : S{semaine_min_data:02d}/{annee_min_data} → S{semaine_max_data:02d}/{annee_max_data}")
+                st.stop()
+            
+            st.success(f"✅ **{df_after_filter:,} cas** sur la période sélectionnée ({df_before_filter - df_after_filter} cas exclus)")
+            
+        else:
+            st.error("❌ Colonnes 'Annee' et 'Semaine_Epi' manquantes")
             st.stop()
         
-        st.success(f"✅ **{df_after_filter:,} cas** sur la période sélectionnée ({df_before_filter - df_after_filter} cas exclus)")
-    else:
-        st.error("❌ Aucune date valide trouvée dans les données")
-        st.stop()
+        # Vérifier qu'il reste des données après filtrage
+        if len(df) == 0:
+            st.error("❌ Aucune donnée disponible après filtrage")
+            st.stop()
+        
+        st.sidebar.success(f"✅ {len(df)} cas analysés")
+
 
 # ====== CRÉER LES COLONNES TEMPORELLES ======
 if 'Date_Debut_Eruption' in df.columns:
@@ -1361,9 +1441,6 @@ with col5:
     pct_aires = (n_aires_touchees / len(sa_gdf)) * 100
     st.metric("🗺️ Aires touchées", f"{n_aires_touchees}/{len(sa_gdf)}", delta=f"{pct_aires:.0f}%")
 
-# ============================================================
-# TOP 10 AIRES DE SANTÉ
-# ============================================================
 
 # ============================================================
 # TOP 10 AIRES DE SANTÉ - PAR TAUX D'ATTAQUE ET PAR CAS
@@ -1393,13 +1470,17 @@ if 'Taux_Non_Vaccines' not in cases_by_area.columns:
 if 'Age_Moyen' not in cases_by_area.columns:
     cases_by_area['Age_Moyen'] = 0
 
-# Fusionner avec les données géographiques pour avoir la population
+# 🔧 CORRECTION : Fusionner avec les données géographiques
 cases_by_area = cases_by_area.merge(
     sa_gdf_enrichi[['health_area', 'Pop_Totale', 'Pop_Enfants']],
     left_on='Aire_Sante',
     right_on='health_area',
     how='left'
 )
+
+# 🔧 CORRECTION : Gérer les aires sans correspondance
+cases_by_area['Pop_Totale'] = cases_by_area['Pop_Totale'].fillna(0)
+cases_by_area['Pop_Enfants'] = cases_by_area['Pop_Enfants'].fillna(0)
 
 # Calculer le taux d'attaque pour 10 000 habitants
 cases_by_area['Taux_Attaque_10K'] = (
@@ -1482,9 +1563,12 @@ with tab2:
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    taux_max = cases_by_area['Taux_Attaque_10K'].max()
-    aire_taux_max = cases_by_area.loc[cases_by_area['Taux_Attaque_10K'].idxmax(), 'Aire_Sante']
-    st.metric("Taux d'attaque max", f"{taux_max:.1f}/10K", f"Aire : {aire_taux_max}")
+    if len(cases_by_area[cases_by_area['Taux_Attaque_10K'] > 0]) > 0:
+        taux_max = cases_by_area['Taux_Attaque_10K'].max()
+        aire_taux_max = cases_by_area.loc[cases_by_area['Taux_Attaque_10K'].idxmax(), 'Aire_Sante']
+        st.metric("Taux d'attaque max", f"{taux_max:.1f}/10K", aire_taux_max)
+    else:
+        st.metric("Taux d'attaque max", "N/A")
 
 with col2:
     taux_moyen = cases_by_area['Taux_Attaque_10K'].mean()
@@ -1498,16 +1582,23 @@ with col3:
 # FUSION AVEC LE GEODATAFRAME (IMPORTANT - NE PAS SUPPRIMER)
 # ============================================================
 
+# 🔧 CORRECTION : Utiliser Aire_Sante au lieu de health_area
 sa_gdf_with_cases = sa_gdf_enrichi.merge(
-    cases_by_area,
+    cases_by_area[['Aire_Sante', 'Cas_Observes', 'Taux_Non_Vaccines', 'Age_Moyen', 'Taux_Attaque_10K']],
     left_on='health_area',
     right_on='Aire_Sante',
     how='left'
 )
 
-sa_gdf_with_cases['Cas_Observes'] = sa_gdf_with_cases['Cas_Observes'].fillna(0)
+# Remplir les valeurs manquantes
+sa_gdf_with_cases['Cas_Observes'] = sa_gdf_with_cases['Cas_Observes'].fillna(0).astype(int)
 sa_gdf_with_cases['Taux_Non_Vaccines'] = sa_gdf_with_cases['Taux_Non_Vaccines'].fillna(0)
-sa_gdf_with_cases['Taux_Attaque_10000'] = sa_gdf_with_cases['Taux_Attaque_10K'].fillna(0)
+sa_gdf_with_cases['Age_Moyen'] = sa_gdf_with_cases['Age_Moyen'].fillna(0)
+sa_gdf_with_cases['Taux_Attaque_10K'] = sa_gdf_with_cases['Taux_Attaque_10K'].fillna(0)
+
+# 🔧 CORRECTION : Créer Taux_Attaque_10000 à partir de Taux_Attaque_10K
+sa_gdf_with_cases['Taux_Attaque_10000'] = sa_gdf_with_cases['Taux_Attaque_10K']
+
 
 # ============================================================
 # LA SECTION "CARTOGRAPHIE" COMMENCE ICI
