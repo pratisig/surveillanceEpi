@@ -1211,9 +1211,8 @@ sa_gdf_with_cases["Taux_Attaque_10000"] = (
     sa_gdf_with_cases["Pop_Enfants"].replace(0, np.nan) * 10000
 ).replace([np.inf, -np.inf], np.nan)
 # ============================================================
-# PARTIE 4/5 — ONGLETS PRINCIPAUX
+# ONGLETS PRINCIPAUX — structure corrigée
 # ============================================================
-
 tab1, tab2, tab3 = st.tabs([
     "📊 Dashboard & Analyse",
     "🗺️ Cartographie",
@@ -1224,41 +1223,31 @@ tab1, tab2, tab3 = st.tabs([
 # TAB 1 — DASHBOARD & ANALYSE
 # ============================================================
 with tab1:
-    st.header("📊 Indicateurs Clés de Performance")
 
+    st.header("📊 Indicateurs Clés de Performance")
     ann_str = ", ".join(str(a) for a in sorted(set(df["Annee"].dropna().astype(int))))
-    st.caption(f"📌 Analyse : Années **{ann_str}** | **{df['Aire_Sante'].nunique()}** aires | **{df['Semaine_Epi'].nunique()}** semaines | Dernière semaine : **S{derniere_semaine_epi:02d} {derniere_annee}**")
+    st.caption(f"📌 Analyse : Années **{ann_str}** | **{df['Aire_Sante'].nunique()}** aires | "
+               f"**{df['Semaine_Epi'].nunique()}** semaines | Dernière semaine : **S{derniere_semaine_epi:02d} {derniere_annee}**")
 
     col1, col2, col3, col4, col5 = st.columns(5)
-
     with col1:
         st.metric("📈 Cas totaux", f"{len(df):,}")
-
     with col2:
-        # CORRECTION 4 : vaccination conditionnelle
         if has_vaccination_reel:
             taux_non_vac = (df["Statut_Vaccinal"] == "Non").mean() * 100
-            delta_vac = taux_non_vac - 45
-            st.metric("💉 Non vaccinés", f"{taux_non_vac:.1f}%", delta=f"{delta_vac:+.1f}%")
+            st.metric("💉 Non vaccinés", f"{taux_non_vac:.1f}%", delta=f"{taux_non_vac-45:+.1f}%")
         else:
             st.metric("💉 Non vaccinés", "N/A")
-
     with col3:
-        # CORRECTION 1 : âge médian depuis WorldPop en priorité
         if donnees_dispo["Population"] and age_median_worldpop is not None:
             st.metric("👶 Âge médian (WorldPop)", f"{int(age_median_worldpop)} mois")
         elif has_age_reel:
             st.metric("👶 Âge médian", f"{int(df['Age_Mois'].median())} mois")
         else:
             st.metric("👶 Âge médian", "N/A")
-
     with col4:
         taux_letalite = ((df["Issue"] == "Décédé").mean() * 100) if "Issue" in df.columns else 0
-        if taux_letalite > 0:
-            st.metric("☠️ Létalité", f"{taux_letalite:.2f}%")
-        else:
-            st.metric("☠️ Létalité", "N/A")
-
+        st.metric("☠️ Létalité", f"{taux_letalite:.2f}%" if taux_letalite > 0 else "N/A")
     with col5:
         n_aires_touchees = df["Aire_Sante"].nunique()
         pct_aires = (n_aires_touchees / len(sa_gdf)) * 100
@@ -1267,8 +1256,13 @@ with tab1:
     # ── Courbe épidémique ─────────────────────────────────────
     st.header("📈 Analyse Temporelle par Semaines Épidémiologiques")
 
-    weekly_cases = df.groupby(["Annee","Semaine_Epi","sort_key"]).size().reset_index(name="Cas")
-    weekly_cases["Semaine_Label"] = weekly_cases["Annee"].astype(str) + "-S" + weekly_cases["Semaine_Epi"].astype(str).str.zfill(2)
+    if "sort_key" not in df.columns:
+        df["sort_key"] = df["Annee"] * 100 + df["Semaine_Epi"]
+
+    weekly_cases = df.groupby(["Annee","Semaine_Epi"]).size().reset_index(name="Cas")
+    weekly_cases["sort_key"] = weekly_cases["Annee"] * 100 + weekly_cases["Semaine_Epi"]
+    weekly_cases["Semaine_Label"] = (weekly_cases["Annee"].astype(str) + "-S" +
+                                     weekly_cases["Semaine_Epi"].astype(str).str.zfill(2))
     weekly_cases = weekly_cases.sort_values("sort_key")
 
     fig_epi = go.Figure()
@@ -1278,48 +1272,54 @@ with tab1:
         line=dict(color="#d32f2f", width=3), marker=dict(size=6),
         hovertemplate="<b>%{x}</b><br>Cas : %{y}<extra></extra>"
     ))
+    try:
+        from scipy.signal import savgol_filter
+        if len(weekly_cases) > 5:
+            wl = min(7, len(weekly_cases) if len(weekly_cases) % 2 == 1 else len(weekly_cases) - 1)
+            tendance = savgol_filter(weekly_cases["Cas"].values, window_length=wl, polyorder=2)
+            fig_epi.add_trace(go.Scatter(
+                x=weekly_cases["Semaine_Label"], y=tendance,
+                mode="lines", name="Tendance",
+                line=dict(color="#1976d2", width=2, dash="dash")
+            ))
+    except Exception:
+        pass
 
-    from scipy.signal import savgol_filter
-    if len(weekly_cases) > 5:
-        wl = min(7, len(weekly_cases) if len(weekly_cases) % 2 == 1 else len(weekly_cases) - 1)
-        tendance = savgol_filter(weekly_cases["Cas"], window_length=wl, polyorder=2)
-        fig_epi.add_trace(go.Scatter(
-            x=weekly_cases["Semaine_Label"], y=tendance,
-            mode="lines", name="Tendance",
-            line=dict(color="#1976d2", width=2, dash="dash")
-        ))
-
-    fig_epi.add_hline(y=seuil_alerte_epidemique, line_dash="dot", line_color="orange",
-                      annotation_text=f"Seuil d'alerte ({seuil_alerte_epidemique} cas/sem)",
-                      annotation_position="right")
+    fig_epi.add_hline(
+        y=float(seuil_alerte_epidemique),
+        line_dash="dot", line_color="orange",
+        annotation_text=f"Seuil d'alerte ({seuil_alerte_epidemique} cas/sem)",
+        annotation_position="right"
+    )
     fig_epi.update_layout(
         title="Courbe épidémique par semaines épidémiologiques",
         xaxis_title="Semaine épidémiologique", yaxis_title="Nombre de cas",
         hovermode="x unified", height=400,
-        xaxis=dict(tickangle=-45, nticks=20)
+        xaxis=dict(tickangle=-45, nticks=20), template="plotly_white"
     )
     st.plotly_chart(fig_epi, use_container_width=True)
 
     col1, col2, col3 = st.columns(3)
     with col1:
         semaine_max = weekly_cases.loc[weekly_cases["Cas"].idxmax()]
-        st.metric("🔴 Semaine pic maximal", semaine_max["Semaine_Label"], f"{int(semaine_max['Cas'])} cas")
+        st.metric("🔴 Semaine pic", semaine_max["Semaine_Label"], f"{int(semaine_max['Cas'])} cas")
     with col2:
-        st.metric("📊 Moyenne hebdomadaire", f"{weekly_cases['Cas'].mean():.1f} cas")
+        st.metric("📊 Moyenne hebdo", f"{weekly_cases['Cas'].mean():.1f} cas")
     with col3:
         if len(weekly_cases) >= 2:
             variation = weekly_cases.iloc[-1]["Cas"] - weekly_cases.iloc[-2]["Cas"]
-            cas_prec = weekly_cases.iloc[-2]["Cas"]
-            pct_var = (variation / cas_prec * 100) if cas_prec > 0 else 0
+            cas_prec  = weekly_cases.iloc[-2]["Cas"]
+            pct_var   = (variation / cas_prec * 100) if cas_prec > 0 else 0
             st.metric("📉 Variation dernière semaine", f"{int(variation):+d} cas", f"{pct_var:+.1f}%")
         else:
             st.metric("📉 Variation dernière semaine", "N/A")
 
-    # ── Distribution par âge (CORRECTION 5 : conditionnel) ───
+    # ── Distribution par âge ──────────────────────────────────
     st.subheader("👶 Distribution par Tranches d'Âge")
     if has_age_reel:
         df["Tranche_Age"] = pd.cut(df["Age_Mois"],
-            bins=[0,12,60,120,180], labels=["0-1 an","1-5 ans","5-10 ans","10-15 ans"])
+            bins=[0,12,60,120,180],
+            labels=["0-1 an","1-5 ans","5-10 ans","10-15 ans"])
         agg_dict_age = {"ID_Cas": "count"}
         if has_vaccination_reel:
             agg_dict_age["Statut_Vaccinal"] = lambda x: (x == "Non").mean() * 100
@@ -1336,421 +1336,336 @@ with tab1:
             fig_age.update_traces(textposition="outside")
             st.plotly_chart(fig_age, use_container_width=True)
         with col2:
-            if has_vaccination_reel and "Pct_Non_Vaccines" in age_stats.columns and age_stats["Pct_Non_Vaccines"].sum() > 0:
+            if has_vaccination_reel and "Pct_Non_Vaccines" in age_stats.columns:
                 fig_vacc_age = px.bar(age_stats, x="Tranche_Age", y="Pct_Non_Vaccines",
                     title="% non vaccinés par âge", color="Pct_Non_Vaccines",
-                    color_continuous_scale="Oranges", text="Pct_Non_Vaccines")
-                fig_vacc_age.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                    color_continuous_scale="Oranges")
                 st.plotly_chart(fig_vacc_age, use_container_width=True)
             else:
-                st.info("ℹ️ Données de vaccination par âge non disponibles dans ce fichier")
+                st.info("ℹ️ Données vaccination par âge non disponibles")
     else:
         st.info("ℹ️ Données d'âge non disponibles dans ce fichier")
 
-    # ── CORRECTION 6 : Top 10 — 2 onglets ────────────────────
+    # ── Top 10 ────────────────────────────────────────────────
     st.header("🏆 Top 10 des Aires les Plus Touchées")
     top_data = sa_gdf_with_cases[["health_area","Cas_Observes","Taux_Attaque_10000"]].copy()
     top_data = top_data[top_data["Cas_Observes"] > 0]
-    has_taux = "Taux_Attaque_10000" in top_data.columns and top_data["Taux_Attaque_10000"].notna().sum() > 0
-
+    has_taux = ("Taux_Attaque_10000" in top_data.columns and
+                top_data["Taux_Attaque_10000"].notna().sum() > 0)
     if has_taux:
-        tab_ta, tab_cas = st.tabs(["📊 Par taux d'attaque (/10 000 hab.)", "📊 Par nombre de cas"])
+        tab_ta, tab_cas = st.tabs(["📊 Taux d'attaque","📊 Nombre de cas"])
         with tab_ta:
-            top10_ta = top_data.nlargest(10, "Taux_Attaque_10000").sort_values("Taux_Attaque_10000")
-            fig_ta = go.Figure(go.Bar(x=top10_ta["Taux_Attaque_10000"], y=top10_ta["health_area"],
-                orientation="h", marker_color="#e53935",
-                text=top10_ta["Taux_Attaque_10000"].apply(lambda v: f"{v:.1f}" if pd.notna(v) else "N/A"),
-                textposition="outside"))
-            fig_ta.update_layout(title="Top 10 — Taux d'attaque (/10 000 hab.)",
-                xaxis_title="Taux d'attaque", height=400, template="plotly_white")
+            top10 = top_data.nlargest(10,"Taux_Attaque_10000").sort_values("Taux_Attaque_10000")
+            fig_ta = px.bar(top10, x="Taux_Attaque_10000", y="health_area",
+                orientation="h", color="Taux_Attaque_10000",
+                color_continuous_scale="Reds",
+                title="Top 10 — Taux d'attaque (/10 000 hab.)")
             st.plotly_chart(fig_ta, use_container_width=True)
         with tab_cas:
-            top10_cas = top_data.nlargest(10, "Cas_Observes").sort_values("Cas_Observes")
-            fig_cas = go.Figure(go.Bar(x=top10_cas["Cas_Observes"], y=top10_cas["health_area"],
-                orientation="h", marker_color="#c62828",
-                text=top10_cas["Cas_Observes"].astype(int), textposition="outside"))
-            fig_cas.update_layout(title="Top 10 — Nombre de cas",
-                xaxis_title="Nombre de cas", height=400, template="plotly_white")
+            top10c = top_data.nlargest(10,"Cas_Observes").sort_values("Cas_Observes")
+            fig_cas = px.bar(top10c, x="Cas_Observes", y="health_area",
+                orientation="h", color="Cas_Observes",
+                color_continuous_scale="Reds", title="Top 10 — Nombre de cas")
             st.plotly_chart(fig_cas, use_container_width=True)
     else:
-        top10_cas = top_data.nlargest(10, "Cas_Observes").sort_values("Cas_Observes")
-        fig_cas = go.Figure(go.Bar(x=top10_cas["Cas_Observes"], y=top10_cas["health_area"],
-            orientation="h", marker_color="#c62828",
-            text=top10_cas["Cas_Observes"].astype(int), textposition="outside"))
-        fig_cas.update_layout(title="Top 10 — Nombre de cas", height=400, template="plotly_white")
+        top10c = top_data.nlargest(10,"Cas_Observes").sort_values("Cas_Observes")
+        fig_cas = px.bar(top10c, x="Cas_Observes", y="health_area",
+            orientation="h", title="Top 10 — Nombre de cas")
         st.plotly_chart(fig_cas, use_container_width=True)
 
-    # ── CORRECTION 4 : Pyramide des âges WorldPop (RESTAURÉE) ─
-    st.header("📊 Pyramide des Âges - Population Enfantine")
+    # ── Pyramide des âges WorldPop ────────────────────────────
+    st.header("📊 Pyramide des Âges — Population Enfantine (WorldPop)")
     if donnees_dispo["Population"]:
-        pyramid_data = []
-        for idx, row in sa_gdf_enrichi.iterrows():
-            aire = row['health_area']
-            pop_0_1_m   = row.get('Pop_M_0', 0) + row.get('Pop_M_1', 0)
-            pop_5_9_m   = row.get('Pop_M_5', 0)
-            pop_10_14_m = row.get('Pop_M_10', 0)
-            pop_0_1_f   = row.get('Pop_F_0', 0) + row.get('Pop_F_1', 0)
-            pop_5_9_f   = row.get('Pop_F_5', 0)
-            pop_10_14_f = row.get('Pop_F_10', 0)
-            pyramid_data.append({
-                'Aire': aire,
-                'Garçons_0-4': pop_0_1_m,  'Garçons_5-9': pop_5_9_m,   'Garçons_10-14': pop_10_14_m,
-                'Filles_0-4':  pop_0_1_f,  'Filles_5-9':  pop_5_9_f,   'Filles_10-14':  pop_10_14_f
-            })
-        pyramid_df = pd.DataFrame(pyramid_data)
-        tG04 = pyramid_df['Garçons_0-4'].sum();  tG59 = pyramid_df['Garçons_5-9'].sum();  tG1014 = pyramid_df['Garçons_10-14'].sum()
-        tF04 = pyramid_df['Filles_0-4'].sum();   tF59 = pyramid_df['Filles_5-9'].sum();   tF1014 = pyramid_df['Filles_10-14'].sum()
-        pyramid_plot_df = pd.DataFrame({
-            'Age': ['0-4','5-9','10-14'],
-            'Garçons': [-tG04, -tG59, -tG1014],
-            'Filles':  [ tF04,  tF59,  tF1014]
+        tG04   = sa_gdf_enrichi.get("Pop_M_0", pd.Series(0)).fillna(0).sum() + \
+                 sa_gdf_enrichi.get("Pop_M_1", pd.Series(0)).fillna(0).sum()
+        tG59   = sa_gdf_enrichi.get("Pop_M_5",  pd.Series(0)).fillna(0).sum()
+        tG1014 = sa_gdf_enrichi.get("Pop_M_10", pd.Series(0)).fillna(0).sum()
+        tF04   = sa_gdf_enrichi.get("Pop_F_0", pd.Series(0)).fillna(0).sum() + \
+                 sa_gdf_enrichi.get("Pop_F_1", pd.Series(0)).fillna(0).sum()
+        tF59   = sa_gdf_enrichi.get("Pop_F_5",  pd.Series(0)).fillna(0).sum()
+        tF1014 = sa_gdf_enrichi.get("Pop_F_10", pd.Series(0)).fillna(0).sum()
+
+        pyr_df = pd.DataFrame({
+            "Age":    ["0-4 ans","5-9 ans","10-14 ans"],
+            "Garçons": [-float(tG04), -float(tG59), -float(tG1014)],
+            "Filles":  [ float(tF04),  float(tF59),  float(tF1014)]
         })
+        max_v = max(abs(pyr_df["Garçons"].min()), pyr_df["Filles"].max(), 1)
+
         fig_pyr = go.Figure()
-        fig_pyr.add_trace(go.Bar(y=pyramid_plot_df['Age'], x=pyramid_plot_df['Garçons'],
-            name='Garçons', orientation='h', marker=dict(color='#42a5f5'),
-            text=[f"{abs(x):,.0f}" for x in pyramid_plot_df['Garçons']], textposition='inside',
-            hovertemplate='<b>%{y} ans</b><br>Garçons: %{text}<extra></extra>'))
-        fig_pyr.add_trace(go.Bar(y=pyramid_plot_df['Age'], x=pyramid_plot_df['Filles'],
-            name='Filles', orientation='h', marker=dict(color='#ec407a'),
-            text=[f"{x:,.0f}" for x in pyramid_plot_df['Filles']], textposition='inside',
-            hovertemplate='<b>%{y} ans</b><br>Filles: %{text}<extra></extra>'))
-        max_val = max(abs(pyramid_plot_df['Garçons'].min()), pyramid_plot_df['Filles'].max())
+        fig_pyr.add_trace(go.Bar(
+            y=pyr_df["Age"], x=pyr_df["Garçons"], name="Garçons",
+            orientation="h", marker_color="#42a5f5",
+            text=[f"{abs(int(x)):,}" for x in pyr_df["Garçons"]],
+            textposition="inside"
+        ))
+        fig_pyr.add_trace(go.Bar(
+            y=pyr_df["Age"], x=pyr_df["Filles"], name="Filles",
+            orientation="h", marker_color="#ec407a",
+            text=[f"{int(x):,}" for x in pyr_df["Filles"]],
+            textposition="inside"
+        ))
         fig_pyr.update_layout(
-            title='Pyramide des Âges - Population Enfantine (0-14 ans)',
-            xaxis=dict(title='Population',
-                tickvals=[-max_val,-max_val/2,0,max_val/2,max_val],
-                ticktext=[f"{int(max_val):,}",f"{int(max_val/2):,}","0",f"{int(max_val/2):,}",f"{int(max_val):,}"],
-                range=[-max_val*1.1, max_val*1.1]),
-            yaxis=dict(title="Tranche d'âge"),
-            barmode='overlay', height=400, bargap=0.1,
-            showlegend=True, legend=dict(x=0.85,y=0.95), hovermode='y unified'
+            title="Pyramide des Âges — Population Enfantine (0-14 ans) — Source : WorldPop",
+            xaxis=dict(
+                title="Population",
+                tickvals=[-max_v, -max_v/2, 0, max_v/2, max_v],
+                ticktext=[f"{int(max_v):,}", f"{int(max_v/2):,}", "0",
+                          f"{int(max_v/2):,}", f"{int(max_v):,}"],
+                range=[-max_v * 1.1, max_v * 1.1]
+            ),
+            yaxis_title="Tranche d'âge",
+            barmode="overlay", height=400, bargap=0.1,
+            template="plotly_white", hovermode="y unified"
         )
         st.plotly_chart(fig_pyr, use_container_width=True)
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            total_garcons = tG04 + tG59 + tG1014
-            st.metric("👦 Garçons (0-14 ans)", f"{int(total_garcons):,}")
+            st.metric("👦 Garçons (0-14 ans)", f"{int(tG04+tG59+tG1014):,}")
         with col2:
-            total_filles = tF04 + tF59 + tF1014
-            st.metric("👧 Filles (0-14 ans)", f"{int(total_filles):,}")
+            st.metric("👧 Filles (0-14 ans)", f"{int(tF04+tF59+tF1014):,}")
         with col3:
-            ratio = (total_garcons / total_filles * 100) if total_filles > 0 else 0
+            tG = tG04 + tG59 + tG1014
+            tF = tF04 + tF59 + tF1014
+            ratio = (tG / tF * 100) if tF > 0 else 0
             st.metric("⚖️ Ratio G/F", f"{ratio:.1f}%")
     else:
-        st.info("📊 Données de population non disponibles. Pyramide des âges non affichable.")
+        st.info("📊 Données WorldPop non disponibles")
 
-    # ── Nowcasting - Correction des Délais de Notification ────────
-st.subheader("⏱️ Nowcasting - Correction des Délais de Notification")
-st.info("**Nowcasting :** Technique d'ajustement permettant d'estimer le nombre réel "
-        "de cas en tenant compte des délais de notification.")
+    # ── Nowcasting ────────────────────────────────────────────
+    st.subheader("⏱️ Nowcasting — Correction des Délais de Notification")
+    st.info("**Nowcasting :** Technique d'ajustement estimant le nombre réel de cas "
+            "en tenant compte des délais de notification.")
 
-if "Date_Notification" in df.columns and "Date_Debut_Eruption" in df.columns:
-    # CORRECTION : forcer numérique avant tout calcul
-    delai_raw = (
-        pd.to_datetime(df["Date_Notification"], errors="coerce") -
-        pd.to_datetime(df["Date_Debut_Eruption"], errors="coerce")
-    ).dt.days
-    df["Delai_Notification"] = pd.to_numeric(delai_raw, errors="coerce")
-    delai_available = df["Delai_Notification"].notna().sum() > 0
-else:
-    df["Delai_Notification"] = 3
-    delai_available = False
-
-# CORRECTION : conversion explicite en float natif Python (pas numpy)
-# pour éviter TypeError dans  (Plotly n'accepte pas numpy float)
-_delai_series = pd.to_numeric(df["Delai_Notification"], errors="coerce").dropna()
-
-delai_moyen  = float(_delai_series.mean())   if len(_delai_series) > 0 else float('nan')
-delai_median = float(_delai_series.median()) if len(_delai_series) > 0 else float('nan')
-delai_std    = float(_delai_series.std())    if len(_delai_series) > 0 else float('nan')
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Délai moyen",
-              f"{delai_moyen:.1f} jours" if delai_available and not np.isnan(delai_moyen) else "N/A")
-with col2:
-    st.metric("Délai médian",
-              f"{delai_median:.0f} jours" if delai_available and not np.isnan(delai_median) else "N/A")
-with col3:
-    st.metric("Écart-type",
-              f"{delai_std:.1f} jours" if delai_available and not np.isnan(delai_std) else "N/A")
-with col4:
-    derniere_semaine_label = weekly_cases.iloc[-1]['Semaine_Label']
-    cas_derniere_semaine   = int(weekly_cases.iloc[-1]['Cas'])
-    if delai_available and not np.isnan(delai_moyen):
-        facteur_correction = 1 + (delai_moyen / 7)
-        cas_corriges = int(cas_derniere_semaine * facteur_correction)
-        st.metric(f"Cas corrigés ({derniere_semaine_label})",
-                  cas_corriges, delta=f"+{cas_corriges - cas_derniere_semaine}")
+    if "Date_Notification" in df.columns and "Date_Debut_Eruption" in df.columns:
+        delai_raw = (pd.to_datetime(df["Date_Notification"], errors="coerce") -
+                     pd.to_datetime(df["Date_Debut_Eruption"], errors="coerce")).dt.days
+        df["Delai_Notification"] = pd.to_numeric(delai_raw, errors="coerce")
+        delai_available = df["Delai_Notification"].notna().sum() > 0
     else:
-        st.metric(f"Cas corrigés ({derniere_semaine_label})",
-                  cas_derniere_semaine, delta="N/A")
+        df["Delai_Notification"] = 3
+        delai_available = False
 
-if delai_available:
-    df_delai_plot = df[
-        pd.to_numeric(df["Delai_Notification"], errors="coerce").between(-5, 60)
-    ].copy()
-    df_delai_plot["Delai_Notification"] = pd.to_numeric(
-        df_delai_plot["Delai_Notification"], errors="coerce")
+    _d = pd.to_numeric(df["Delai_Notification"], errors="coerce").dropna()
+    delai_moyen  = float(_d.mean())   if len(_d) > 0 else float("nan")
+    delai_median = float(_d.median()) if len(_d) > 0 else float("nan")
+    delai_std    = float(_d.std())    if len(_d) > 0 else float("nan")
 
-    if len(df_delai_plot) > 0:
-        fig_delai = px.histogram(
-            df_delai_plot, x="Delai_Notification", nbins=20,
-            title="Distribution des délais de notification",
-            labels={"Delai_Notification": "Délai (jours)", "count": "Nombre de cas"},
-            color_discrete_sequence=['#d32f2f']
-        )
-        # CORRECTION : float() Python pur obligatoire pour add_vline
-        if not np.isnan(delai_moyen):
-            fig_delai.add_vline(
-                x=float(delai_moyen), line_dash="dash", line_color="blue",
-                annotation_text=f"Moyenne : {delai_moyen:.1f}j",
-                annotation_position="top right"
-            )
-        if not np.isnan(delai_median):
-            fig_delai.add_vline(
-                x=float(delai_median), line_dash="dash", line_color="green",
-                annotation_text=f"Médiane : {delai_median:.0f}j",
-                annotation_position="top left"
-            )
-        fig_delai.update_layout(template="plotly_white", height=350)
-        st.plotly_chart(fig_delai, use_container_width=True)
-else:
-    st.info("ℹ️ Données de délai de notification non disponibles")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Délai moyen",
+                  f"{delai_moyen:.1f} j" if not np.isnan(delai_moyen) else "N/A")
+    with col2:
+        st.metric("Délai médian",
+                  f"{delai_median:.0f} j" if not np.isnan(delai_median) else "N/A")
+    with col3:
+        st.metric("Écart-type",
+                  f"{delai_std:.1f} j" if not np.isnan(delai_std) else "N/A")
+    with col4:
+        lbl = weekly_cases.iloc[-1]["Semaine_Label"]
+        cas_dern = int(weekly_cases.iloc[-1]["Cas"])
+        if delai_available and not np.isnan(delai_moyen):
+            cor = int(cas_dern * (1 + delai_moyen / 7))
+            st.metric(f"Cas corrigés ({lbl})", cor, delta=f"+{cor - cas_dern}")
+        else:
+            st.metric(f"Cas ({lbl})", cas_dern)
 
+    if delai_available:
+        df_dp = df[pd.to_numeric(df["Delai_Notification"],
+                                  errors="coerce").between(-5, 60)].copy()
+        df_dp["Delai_Notification"] = pd.to_numeric(
+            df_dp["Delai_Notification"], errors="coerce")
+        if len(df_dp) > 0:
+            fig_d = px.histogram(df_dp, x="Delai_Notification", nbins=20,
+                title="Distribution des délais de notification",
+                color_discrete_sequence=["#d32f2f"])
+            if not np.isnan(delai_moyen):
+                fig_d.add_vline(x=float(delai_moyen), line_dash="dash",
+                    line_color="blue",
+                    annotation_text=f"Moyenne : {delai_moyen:.1f}j",
+                    annotation_position="top right")
+            if not np.isnan(delai_median):
+                fig_d.add_vline(x=float(delai_median), line_dash="dash",
+                    line_color="green",
+                    annotation_text=f"Médiane : {delai_median:.0f}j",
+                    annotation_position="top left")
+            fig_d.update_layout(template="plotly_white", height=350)
+            st.plotly_chart(fig_d, use_container_width=True)
+    else:
+        st.info("ℹ️ Données de délai non disponibles")
 
 
 # ============================================================
-# CARTOGRAPHIE DE LA SITUATION ACTUELLE
+# TAB 2 — CARTOGRAPHIE (indenté correctement sous with tab2:)
 # ============================================================
 with tab2:
-st.header("🗺️ Cartographie de la Situation Actuelle")
 
-# ── Sécurisation des types avant affichage ────────────────────
-def safe_float(val):
-    """Retourne float ou np.nan — jamais None ni str."""
+    st.header("🗺️ Cartographie de la Situation Actuelle")
+
+    def safe_float(val):
+        try:
+            f = float(val)
+            return np.nan if np.isinf(f) else f
+        except (TypeError, ValueError):
+            return np.nan
+
+    def safe_int(val, default=0):
+        try:
+            f = float(val)
+            return default if np.isnan(f) or np.isinf(f) else int(f)
+        except (TypeError, ValueError):
+            return default
+
+    def fmt_val(val, fmt="{:.1f}", suffix="", fallback="N/A"):
+        f = safe_float(val)
+        return fallback if np.isnan(f) else fmt.format(f) + suffix
+
     try:
-        f = float(val)
-        return np.nan if np.isinf(f) else f
-    except (TypeError, ValueError):
-        return np.nan
+        center_lat = float(sa_gdf_with_cases.geometry.centroid.y.mean())
+        center_lon = float(sa_gdf_with_cases.geometry.centroid.x.mean())
+        if np.isnan(center_lat) or np.isnan(center_lon):
+            center_lat, center_lon = 15.0, 2.0
+    except Exception:
+        center_lat, center_lon = 15.0, 2.0
 
-def safe_int(val, default=0):
-    """Retourne int ou default — jamais NaN."""
-    try:
-        f = float(val)
-        return default if np.isnan(f) or np.isinf(f) else int(f)
-    except (TypeError, ValueError):
-        return default
+    m = folium.Map(location=[center_lat, center_lon],
+                   zoom_start=6, tiles="CartoDB positron", control_scale=True)
 
-def fmt_val(val, fmt="{:.1f}", suffix="", fallback="N/A"):
-    """Formate une valeur numérique ou retourne fallback."""
-    f = safe_float(val)
-    if np.isnan(f):
-        return fallback
-    return fmt.format(f) + suffix
+    import branca.colormap as cm
+    max_cases = safe_float(sa_gdf_with_cases["Cas_Observes"].max())
+    max_cases = 1.0 if np.isnan(max_cases) or max_cases == 0 else float(max_cases)
 
-# ── Centroïde carte ───────────────────────────────────────────
-try:
-    center_lat = float(sa_gdf_with_cases.geometry.centroid.y.mean())
-    center_lon = float(sa_gdf_with_cases.geometry.centroid.x.mean())
-    if np.isnan(center_lat) or np.isnan(center_lon):
-        center_lat, center_lon = 15.0, 2.0  # fallback Afrique de l'Ouest
-except Exception:
-    center_lat, center_lon = 15.0, 2.0
+    colormap = cm.LinearColormap(
+        colors=["#e8f5e9","#81c784","#ffeb3b","#ff9800","#f44336","#b71c1c"],
+        vmin=0, vmax=max_cases, caption="Nombre de cas observés")
+    colormap.add_to(m)
 
-# ── Carte Folium ──────────────────────────────────────────────
-m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=6,
-    tiles="CartoDB positron",
-    control_scale=True
-)
+    for _, row in sa_gdf_with_cases.iterrows():
+        aire_name    = str(row.get("health_area", "N/A"))
+        cas_obs      = safe_int(row.get("Cas_Observes", 0))
+        pop_enfants  = safe_float(row.get("Pop_Enfants", np.nan))
+        pop_totale   = safe_float(row.get("Pop_Totale", np.nan))
+        taux_attaque = safe_float(row.get("Taux_Attaque_10000", np.nan))
+        urbanisation = str(row.get("Urbanisation", "N/A")) if pd.notna(row.get("Urbanisation")) else "N/A"
+        densite      = safe_float(row.get("Densite_Pop", np.nan))
+        taux_vacc    = safe_float(row.get("Taux_Vaccination", np.nan))
+        temp_moy     = safe_float(row.get("Temperature_Moy", np.nan))
+        hum_moy      = safe_float(row.get("Humidite_Moy", np.nan))
 
-import branca.colormap as cm
+        fill_color  = colormap(min(cas_obs, max_cases))
+        line_color  = "#b71c1c" if cas_obs >= seuil_alerte_epidemique else "#555555"
+        line_weight = 2.5 if cas_obs >= seuil_alerte_epidemique else 0.5
+        badge = ('<span style="background:#d32f2f;color:white;padding:2px 8px;'
+                 'border-radius:10px;font-size:11px;">⚠️ ALERTE</span>'
+                 if cas_obs >= seuil_alerte_epidemique else "")
 
-max_cases = safe_float(sa_gdf_with_cases["Cas_Observes"].max())
-max_cases = 1 if np.isnan(max_cases) or max_cases == 0 else max_cases
+        popup_html = f"""
+        <div style="font-family:Arial;font-size:13px;width:360px;line-height:1.5;">
+          <div style="background:#1976d2;color:white;padding:10px 14px;
+               border-radius:6px 6px 0 0;margin:-10px -10px 10px -10px;">
+            <b style="font-size:15px;">{aire_name}</b><br>{badge}
+          </div>
+          <b style="color:#d32f2f;">📊 Épidémiologie</b>
+          <table style="width:100%;border-collapse:collapse;margin:6px 0;">
+            <tr style="background:#ffeaea;">
+              <td style="padding:5px 8px;"><b>Cas observés</b></td>
+              <td style="padding:5px 8px;text-align:right;">
+                <b style="font-size:18px;color:#d32f2f;">{cas_obs}</b></td>
+            </tr>
+            <tr><td style="padding:5px 8px;">Taux d'attaque</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(taux_attaque, "{{:.1f}}", " /10 000 enf.")}</td>
+            </tr>
+          </table>
+          <b style="color:#1565c0;">👥 Population</b>
+          <table style="width:100%;border-collapse:collapse;margin:6px 0;">
+            <tr style="background:#e3f2fd;">
+              <td style="padding:5px 8px;">Pop. totale</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_totale, "{{:,.0f}}")}</td>
+            </tr>
+            <tr><td style="padding:5px 8px;">Enfants (0-14 ans)</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_enfants, "{{:,.0f}}")}</td>
+            </tr>
+            <tr style="background:#e3f2fd;">
+              <td style="padding:5px 8px;">Densité</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(densite, "{{:.1f}}", " hab/km²")}</td>
+            </tr>
+            <tr><td style="padding:5px 8px;">Habitat</td>
+              <td style="padding:5px 8px;text-align:right;"><b>{urbanisation}</b></td>
+            </tr>
+          </table>
+          <b style="color:#2e7d32;">💉 Vaccination & Climat</b>
+          <table style="width:100%;border-collapse:collapse;margin:6px 0;">
+            <tr style="background:#e8f5e9;">
+              <td style="padding:5px 8px;">Taux vaccination</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(taux_vacc, "{{:.1f}}", "%")}</td>
+            </tr>
+            <tr><td style="padding:5px 8px;">Température moy.</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(temp_moy, "{{:.1f}}", " °C")}</td>
+            </tr>
+            <tr style="background:#e8f5e9;">
+              <td style="padding:5px 8px;">Humidité moy.</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(hum_moy, "{{:.1f}}", "%")}</td>
+            </tr>
+          </table>
+        </div>"""
 
-colormap = cm.LinearColormap(
-    colors=['#e8f5e9', '#81c784', '#ffeb3b', '#ff9800', '#f44336', '#b71c1c'],
-    vmin=0,
-    vmax=max_cases,
-    caption="Nombre de cas observés"
-)
-colormap.add_to(m)
-
-# ── Ajout des polygones avec popups enrichis ──────────────────
-for _, row in sa_gdf_with_cases.iterrows():
-
-    # Sécurisation de toutes les valeurs
-    aire_name    = str(row.get('health_area', 'N/A'))
-    cas_obs      = safe_int(row.get('Cas_Observes', 0))
-    pop_enfants  = safe_float(row.get('Pop_Enfants',       np.nan))
-    pop_totale   = safe_float(row.get('Pop_Totale',        np.nan))
-    taux_attaque = safe_float(row.get('Taux_Attaque_10000',np.nan))
-    urbanisation = row.get('Urbanisation', 'N/A')
-    urbanisation = str(urbanisation) if pd.notna(urbanisation) else 'N/A'
-    densite      = safe_float(row.get('Densite_Pop',       np.nan))
-    taux_vacc    = safe_float(row.get('Taux_Vaccination',  np.nan))
-    temp_moy     = safe_float(row.get('Temperature_Moy',   np.nan))
-    hum_moy      = safe_float(row.get('Humidite_Moy',      np.nan))
-
-    # Couleur choroplèthe
-    fill_color  = colormap(cas_obs) if cas_obs <= max_cases else '#b71c1c'
-    line_color  = '#b71c1c' if cas_obs >= seuil_alerte_epidemique else '#555555'
-    line_weight = 2.5 if cas_obs >= seuil_alerte_epidemique else 0.5
-
-    # Badge variation
-    badge_alerte = ""
-    if cas_obs >= seuil_alerte_epidemique:
-        badge_alerte = f'<span style="background:#d32f2f;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">⚠️ ALERTE</span>'
-
-    popup_html = f"""
-    <div style="font-family:Arial; font-size:13px; width:360px; line-height:1.5;">
-      <div style="background:#1976d2;color:white;padding:10px 14px;border-radius:6px 6px 0 0;margin:-10px -10px 10px -10px;">
-        <b style="font-size:15px;">{aire_name}</b><br>
-        {badge_alerte}
-      </div>
-
-      <b style="color:#d32f2f;">📊 Situation Épidémiologique</b>
-      <table style="width:100%;border-collapse:collapse;margin:6px 0;">
-        <tr style="background:#ffeaea;">
-          <td style="padding:5px 8px;"><b>Cas observés</b></td>
-          <td style="padding:5px 8px;text-align:right;">
-            <b style="font-size:18px;color:#d32f2f;">{cas_obs}</b>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:5px 8px;">Taux d'attaque</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(taux_attaque, "{:.1f}", " /10 000 enf.")}</td>
-        </tr>
-      </table>
-
-      <b style="color:#1565c0;">👥 Population</b>
-      <table style="width:100%;border-collapse:collapse;margin:6px 0;">
-        <tr style="background:#e3f2fd;">
-          <td style="padding:5px 8px;">Pop. totale</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_totale, "{:,.0f}", "")}</td>
-        </tr>
-        <tr>
-          <td style="padding:5px 8px;">Enfants (0-14 ans)</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_enfants, "{:,.0f}", "")}</td>
-        </tr>
-        <tr style="background:#e3f2fd;">
-          <td style="padding:5px 8px;">Densité pop.</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(densite, "{:.1f}", " hab/km²")}</td>
-        </tr>
-        <tr>
-          <td style="padding:5px 8px;">Type habitat</td>
-          <td style="padding:5px 8px;text-align:right;"><b>{urbanisation}</b></td>
-        </tr>
-      </table>
-
-      <b style="color:#2e7d32;">💉 Vaccination & Climat</b>
-      <table style="width:100%;border-collapse:collapse;margin:6px 0;">
-        <tr style="background:#e8f5e9;">
-          <td style="padding:5px 8px;">Taux vaccination</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(taux_vacc, "{:.1f}", "%")}</td>
-        </tr>
-        <tr>
-          <td style="padding:5px 8px;">Température moy.</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(temp_moy, "{:.1f}", " °C")}</td>
-        </tr>
-        <tr style="background:#e8f5e9;">
-          <td style="padding:5px 8px;">Humidité moy.</td>
-          <td style="padding:5px 8px;text-align:right;">{fmt_val(hum_moy, "{:.1f}", "%")}</td>
-        </tr>
-      </table>
-    </div>
-    """
-
-    # Géométrie — sécurisée
-    try:
-        geom = row['geometry']
-        if geom is None or geom.is_empty:
+        try:
+            geom = row["geometry"]
+            if geom is None or geom.is_empty:
+                continue
+            folium.GeoJson(
+                geom.__geo_interface__,
+                style_function=lambda x, c=fill_color, w=line_weight, bc=line_color: {
+                    "fillColor": c, "color": bc,
+                    "weight": w, "fillOpacity": 0.7, "opacity": 0.9},
+                tooltip=folium.Tooltip(f"<b>{aire_name}</b><br>{cas_obs} cas", sticky=True),
+                popup=folium.Popup(popup_html, max_width=420)
+            ).add_to(m)
+        except Exception:
             continue
 
-        folium.GeoJson(
-            geom.__geo_interface__,
-            style_function=lambda x,
-                c=fill_color, w=line_weight, bc=line_color: {
-                'fillColor':   c,
-                'color':       bc,
-                'weight':      w,
-                'fillOpacity': 0.7,
-                'opacity':     0.9
-            },
-            tooltip=folium.Tooltip(
-                f"<b>{aire_name}</b><br>{cas_obs} cas",
-                sticky=True
-            ),
-            popup=folium.Popup(popup_html, max_width=420)
-        ).add_to(m)
+    heat_data = [
+        [float(r.geometry.centroid.y), float(r.geometry.centroid.x), float(r["Cas_Observes"])]
+        for _, r in sa_gdf_with_cases.iterrows()
+        if safe_int(r.get("Cas_Observes", 0)) > 0 and r.geometry is not None
+    ]
+    if heat_data:
+        HeatMap(heat_data, radius=20, blur=25, max_zoom=13,
+                gradient={0.0:"blue",0.4:"lime",0.7:"yellow",1.0:"red"}).add_to(m)
 
-    except Exception:
-        continue  # Passer les géométries invalides sans planter
+    mc3 = max(max_cases / 3, 1)
+    legend_html = f"""
+    <div style="position:fixed;bottom:50px;left:50px;width:240px;background:white;
+         border:2px solid grey;z-index:9999;font-size:13px;padding:12px;
+         border-radius:6px;box-shadow:2px 2px 6px rgba(0,0,0,0.3);">
+      <p style="margin:0 0 8px;font-weight:bold;">📊 Légende</p>
+      <p style="margin:4px 0;"><span style="background:#e8f5e9;padding:2px 10px;
+         border:1px solid #ccc;">Faible</span> 0 – {mc3:.0f} cas</p>
+      <p style="margin:4px 0;"><span style="background:#ffeb3b;padding:2px 10px;
+         border:1px solid #ccc;">Moyen</span> {mc3:.0f} – {2*mc3:.0f} cas</p>
+      <p style="margin:4px 0;"><span style="background:#f44336;color:white;
+         padding:2px 10px;">Élevé</span> &gt; {2*mc3:.0f} cas</p>
+      <hr style="margin:8px 0;">
+      <p style="margin:4px 0;color:#d32f2f;">
+        <b>⚠️ Seuil alerte :</b> {seuil_alerte_epidemique} cas/sem</p>
+    </div>"""
+    m.get_root().html.add_child(folium.Element(legend_html))
 
-# ── Heatmap géographique ──────────────────────────────────────
-heat_data = [
-    [float(row.geometry.centroid.y),
-     float(row.geometry.centroid.x),
-     float(row['Cas_Observes'])]
-    for _, row in sa_gdf_with_cases.iterrows()
-    if safe_int(row.get('Cas_Observes', 0)) > 0
-    and row.geometry is not None
-]
+    # KEY obligatoire — c'est ce qui évite la page blanche
+    st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole")
 
-if heat_data:
-    HeatMap(
-        heat_data,
-        radius=20, blur=25, max_zoom=13,
-        gradient={0.0: 'blue', 0.4: 'lime', 0.7: 'yellow', 1.0: 'red'}
-    ).add_to(m)
-
-# ── Légende HTML ──────────────────────────────────────────────
-mc3 = max_cases // 3 if max_cases > 3 else 1
-legend_html = f"""
-<div style="position:fixed;bottom:50px;left:50px;width:240px;background:white;
-     border:2px solid grey;z-index:9999;font-size:13px;padding:12px;border-radius:6px;
-     box-shadow:2px 2px 6px rgba(0,0,0,0.3);">
-  <p style="margin:0 0 8px;font-weight:bold;font-size:14px;">📊 Légende</p>
-  <p style="margin:4px 0;">
-    <span style="background:#e8f5e9;padding:2px 10px;border:1px solid #ccc;">Faible</span>
-    &nbsp;0 – {mc3:.0f} cas</p>
-  <p style="margin:4px 0;">
-    <span style="background:#ffeb3b;padding:2px 10px;border:1px solid #ccc;">Moyen</span>
-    &nbsp;{mc3:.0f} – {2*mc3:.0f} cas</p>
-  <p style="margin:4px 0;">
-    <span style="background:#f44336;color:white;padding:2px 10px;">Élevé</span>
-    &nbsp;&gt; {2*mc3:.0f} cas</p>
-  <hr style="margin:8px 0;">
-  <p style="margin:4px 0;color:#d32f2f;">
-    <b>⚠️ Seuil alerte :</b> {seuil_alerte_epidemique} cas/sem
-  </p>
-</div>
-"""
-m.get_root().html.add_child(folium.Element(legend_html))
-
-# ── Affichage — KEY OBLIGATOIRE pour éviter la page blanche ──
-st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole")
-
-# ── Métriques sous la carte ───────────────────────────────────
-col1, col2, col3 = st.columns(3)
-with col1:
-    aires_alerte = len(sa_gdf_with_cases[
-        sa_gdf_with_cases['Cas_Observes'] >= seuil_alerte_epidemique])
-    st.metric("🚨 Aires en alerte", aires_alerte,
-              f"{aires_alerte/len(sa_gdf)*100:.1f}%")
-with col2:
-    aires_sans_cas = len(sa_gdf_with_cases[
-        sa_gdf_with_cases['Cas_Observes'] == 0])
-    st.metric("✅ Aires sans cas", aires_sans_cas,
-              f"{aires_sans_cas/len(sa_gdf)*100:.1f}%")
-with col3:
-    densite_pop_moy = safe_float(sa_gdf_with_cases['Densite_Pop'].mean())
-    st.metric("📍 Densité pop. moy.",
-              fmt_val(densite_pop_moy, "{:.1f}", " hab/km²"))
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        n_al = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
+        st.metric("🚨 Aires en alerte", n_al, f"{n_al/len(sa_gdf)*100:.1f}%")
+    with col2:
+        n_sc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
+        st.metric("✅ Aires sans cas", n_sc, f"{n_sc/len(sa_gdf)*100:.1f}%")
+    with col3:
+        d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
+        st.metric("📍 Densité moy.", fmt_val(d_moy, "{:.1f}", " hab/km²"))
 
 # ============================================================
 # TAB 3 — MODÉLISATION PRÉDICTIVE (RESTAURÉE + CORRECTIONS)
