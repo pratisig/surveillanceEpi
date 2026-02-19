@@ -77,7 +77,16 @@ if 'sa_gdf_cache' not in st.session_state:
     st.session_state.sa_gdf_cache = None
 if 'prediction_rougeole_lancee' not in st.session_state:
     st.session_state.prediction_rougeole_lancee = False
-
+if 'enrichi_ner' not in st.session_state:
+    st.session_state['enrichi_ner'] = None
+if 'enrichi_bfa' not in st.session_state:
+    st.session_state['enrichi_bfa'] = None
+if 'enrichi_mli' not in st.session_state:
+    st.session_state['enrichi_mli'] = None
+if 'enrichi_mrt' not in st.session_state:
+    st.session_state['enrichi_mrt'] = None
+if 'enrichi_upload' not in st.session_state:
+    st.session_state['enrichi_upload'] = None
 # ============================================================
 # CORRECTION 1 & 2 : MAPPING COLONNES ROBUSTE + SÉPARATEUR CSV
 # ============================================================
@@ -1056,10 +1065,19 @@ else:
     climat_start = datetime(datetime.now().year, 1, 1)
     climat_end   = datetime.now()
 
-with st.spinner("🔄 Enrichissement des données..."):
-    pop_df     = worldpop_children_stats(sa_gdf, gee_ok)
-    urban_df   = urban_classification(sa_gdf, gee_ok)
-    climate_df = fetch_climate_nasa_power(sa_gdf, climat_start, climat_end)
+_cache_key = f"enrichi_{iso3_pays if iso3_pays else 'upload'}"
+if _cache_key not in st.session_state or st.session_state[_cache_key] is None:
+    with st.spinner("🔄 Enrichissement des données..."):
+        pop_df     = worldpop_children_stats(sa_gdf, gee_ok)
+        urban_df   = urban_classification(sa_gdf, gee_ok)
+        climate_df = fetch_climate_nasa_power(sa_gdf, climat_start, climat_end)
+        st.session_state[_cache_key] = {
+            "pop": pop_df, "urban": urban_df, "climate": climate_df
+        }
+else:
+    pop_df     = st.session_state[_cache_key]["pop"]
+    urban_df   = st.session_state[_cache_key]["urban"]
+    climate_df = st.session_state[_cache_key]["climate"]
 
 sa_gdf_enrichi = sa_gdf.copy()
 sa_gdf_enrichi = sa_gdf_enrichi.merge(pop_df,     on="health_area", how="left")
