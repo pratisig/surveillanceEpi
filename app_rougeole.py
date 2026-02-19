@@ -1504,14 +1504,10 @@ with tab1:
 
 # ============================================================
 # TAB 2 — CARTOGRAPHIE
-# CORRECTION BUG 1 : toutes les fonctions helper ET st_folium
-# sont maintenant correctement indentées à 8 espaces dans with tab2
 # ============================================================
 with tab2:
-
     st.header("🗺️ Cartographie de la Situation Actuelle")
 
-    # CORRECTION : ces 3 fonctions étaient à 4sp (hors tab2) — maintenant à 8sp
     def safe_float(val):
         try:
             f = float(val)
@@ -1522,14 +1518,15 @@ with tab2:
     def safe_int(val, default=0):
         try:
             f = float(val)
-            return default if np.isnan(f) or np.isinf(f) else int(f)
+            return default if (np.isnan(f) or np.isinf(f)) else int(f)
         except (TypeError, ValueError):
             return default
 
-    def fmt_val(val, fmt="{:.1f}", suffix="", fallback="N/A"):
+    def fmt_val(val, fmt=".1f", suffix="", fallback="N/A"):
         f = safe_float(val)
         return fallback if np.isnan(f) else fmt.format(f) + suffix
 
+    # ── Centrage de la carte ───────────────────────────────────
     try:
         center_lat = float(sa_gdf_with_cases.geometry.centroid.y.mean())
         center_lon = float(sa_gdf_with_cases.geometry.centroid.x.mean())
@@ -1538,85 +1535,70 @@ with tab2:
     except Exception:
         center_lat, center_lon = 15.0, 2.0
 
-    m = folium.Map(location=[center_lat, center_lon],
-                   zoom_start=6, tiles="CartoDB positron", control_scale=True)
+    # ── Construction de la carte folium ───────────────────────
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=6,
+                   tiles="CartoDB positron", control_scale=True)
 
     import branca.colormap as cm
     max_cases = safe_float(sa_gdf_with_cases["Cas_Observes"].max())
-    max_cases = 1.0 if np.isnan(max_cases) or max_cases == 0 else float(max_cases)
+    max_cases = 1.0 if (np.isnan(max_cases) or max_cases <= 0) else float(max_cases)
 
     colormap = cm.LinearColormap(
-        colors=["#e8f5e9","#81c784","#ffeb3b","#ff9800","#f44336","#b71c1c"],
-        vmin=0, vmax=max_cases, caption="Nombre de cas observés")
+        colors=["#e8f5e9", "#81c784", "#ffeb3b", "#ff9800", "#f44336", "#b71c1c"],
+        vmin=0, vmax=max_cases,
+        caption="Nombre de cas observés"
+    )
     colormap.add_to(m)
 
+    # ── Ajout des polygones ────────────────────────────────────
     for _, row in sa_gdf_with_cases.iterrows():
-        aire_name    = str(row.get("health_area", "N/A"))
-        cas_obs      = safe_int(row.get("Cas_Observes", 0))
-        pop_enfants  = safe_float(row.get("Pop_Enfants", np.nan))
-        pop_totale   = safe_float(row.get("Pop_Totale", np.nan))
+        aire_name   = str(row.get("health_area", "N/A"))
+        cas_obs     = safe_int(row.get("Cas_Observes"), 0)
+        pop_enfants = safe_float(row.get("Pop_Enfants", np.nan))
+        pop_totale  = safe_float(row.get("Pop_Totale", np.nan))
         taux_attaque = safe_float(row.get("Taux_Attaque_10000", np.nan))
         urbanisation = str(row.get("Urbanisation", "N/A")) if pd.notna(row.get("Urbanisation")) else "N/A"
-        densite      = safe_float(row.get("Densite_Pop", np.nan))
-        taux_vacc    = safe_float(row.get("Taux_Vaccination", np.nan))
-        temp_moy     = safe_float(row.get("Temperature_Moy", np.nan))
-        hum_moy      = safe_float(row.get("Humidite_Moy", np.nan))
+        densite     = safe_float(row.get("Densite_Pop", np.nan))
+        taux_vacc   = safe_float(row.get("Taux_Vaccination", np.nan))
+        temp_moy    = safe_float(row.get("Temperature_Moy", np.nan))
+        hum_moy     = safe_float(row.get("Humidite_Moy", np.nan))
 
         fill_color  = colormap(min(cas_obs, max_cases))
         line_color  = "#b71c1c" if cas_obs >= seuil_alerte_epidemique else "#555555"
         line_weight = 2.5 if cas_obs >= seuil_alerte_epidemique else 0.5
-        badge = ('<span style="background:#d32f2f;color:white;padding:2px 8px;'
-                 'border-radius:10px;font-size:11px;">⚠️ ALERTE</span>'
-                 if cas_obs >= seuil_alerte_epidemique else "")
+        badge = "<span style='background:#d32f2f;color:white;padding:2px 8px;border-radius:10px;font-size:11px;'>⚠️ ALERTE</span>" if cas_obs >= seuil_alerte_epidemique else ""
 
         popup_html = f"""
         <div style="font-family:Arial;font-size:13px;width:360px;line-height:1.5;">
-          <div style="background:#1976d2;color:white;padding:10px 14px;
-               border-radius:6px 6px 0 0;margin:-10px -10px 10px -10px;">
+          <div style="background:#1976d2;color:white;padding:10px 14px;border-radius:6px 6px 0 0;margin:-10px -10px 10px -10px;">
             <b style="font-size:15px;">{aire_name}</b><br>{badge}
           </div>
           <b style="color:#d32f2f;">📊 Épidémiologie</b>
           <table style="width:100%;border-collapse:collapse;margin:6px 0;">
-            <tr style="background:#ffeaea;">
-              <td style="padding:5px 8px;"><b>Cas observés</b></td>
-              <td style="padding:5px 8px;text-align:right;">
-                <b style="font-size:18px;color:#d32f2f;">{cas_obs}</b></td>
-            </tr>
+            <tr style="background:#ffeaea;"><td style="padding:5px 8px;"><b>Cas observés</b></td>
+              <td style="padding:5px 8px;text-align:right;"><b style="font-size:18px;color:#d32f2f;">{cas_obs}</b></td></tr>
             <tr><td style="padding:5px 8px;">Taux d'attaque</td>
-              <td style="padding:5px 8px;text-align:right;">
-                {fmt_val(taux_attaque, "{{:.1f}}", " /10 000 enf.")}</td>
-            </tr>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(taux_attaque, "{:.1f}", " / 10 000 enf.")}</td></tr>
           </table>
           <b style="color:#1565c0;">👥 Population</b>
           <table style="width:100%;border-collapse:collapse;margin:6px 0;">
-            <tr style="background:#e3f2fd;">
-              <td style="padding:5px 8px;">Pop. totale</td>
-              <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_totale, "{{:,.0f}}")}</td>
-            </tr>
-            <tr><td style="padding:5px 8px;">Enfants (0-14 ans)</td>
-              <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_enfants, "{{:,.0f}}")}</td>
-            </tr>
-            <tr style="background:#e3f2fd;">
-              <td style="padding:5px 8px;">Densité</td>
-              <td style="padding:5px 8px;text-align:right;">{fmt_val(densite, "{{:.1f}}", " hab/km²")}</td>
-            </tr>
+            <tr style="background:#e3f2fd;"><td style="padding:5px 8px;">Pop. totale</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_totale, "{:,.0f}")}</td></tr>
+            <tr><td style="padding:5px 8px;">Enfants 0-14 ans</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(pop_enfants, "{:,.0f}")}</td></tr>
+            <tr style="background:#e3f2fd;"><td style="padding:5px 8px;">Densité</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(densite, "{:.1f}", " hab/km²")}</td></tr>
             <tr><td style="padding:5px 8px;">Habitat</td>
-              <td style="padding:5px 8px;text-align:right;"><b>{urbanisation}</b></td>
-            </tr>
+              <td style="padding:5px 8px;text-align:right;"><b>{urbanisation}</b></td></tr>
           </table>
           <b style="color:#2e7d32;">💉 Vaccination & Climat</b>
           <table style="width:100%;border-collapse:collapse;margin:6px 0;">
-            <tr style="background:#e8f5e9;">
-              <td style="padding:5px 8px;">Taux vaccination</td>
-              <td style="padding:5px 8px;text-align:right;">{fmt_val(taux_vacc, "{{:.1f}}", "%")}</td>
-            </tr>
+            <tr style="background:#e8f5e9;"><td style="padding:5px 8px;">Taux vaccination</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(taux_vacc, "{:.1f}", "%")}</td></tr>
             <tr><td style="padding:5px 8px;">Température moy.</td>
-              <td style="padding:5px 8px;text-align:right;">{fmt_val(temp_moy, "{{:.1f}}", " °C")}</td>
-            </tr>
-            <tr style="background:#e8f5e9;">
-              <td style="padding:5px 8px;">Humidité moy.</td>
-              <td style="padding:5px 8px;text-align:right;">{fmt_val(hum_moy, "{{:.1f}}", "%")}</td>
-            </tr>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(temp_moy, "{:.1f}", "°C")}</td></tr>
+            <tr style="background:#e8f5e9;"><td style="padding:5px 8px;">Humidité moy.</td>
+              <td style="padding:5px 8px;text-align:right;">{fmt_val(hum_moy, "{:.1f}", "%")}</td></tr>
           </table>
         </div>"""
 
@@ -1627,59 +1609,56 @@ with tab2:
             folium.GeoJson(
                 geom.__geo_interface__,
                 style_function=lambda x, c=fill_color, w=line_weight, bc=line_color: {
-                    "fillColor": c, "color": bc,
-                    "weight": w, "fillOpacity": 0.7, "opacity": 0.9},
+                    "fillColor": c, "color": bc, "weight": w,
+                    "fillOpacity": 0.7, "opacity": 0.9
+                },
                 tooltip=folium.Tooltip(f"<b>{aire_name}</b><br>{cas_obs} cas", sticky=True),
                 popup=folium.Popup(popup_html, max_width=420)
             ).add_to(m)
         except Exception:
             continue
 
+    # ── HeatMap ────────────────────────────────────────────────
     heat_data = [
         [float(r.geometry.centroid.y), float(r.geometry.centroid.x), float(r["Cas_Observes"])]
         for _, r in sa_gdf_with_cases.iterrows()
-        if safe_int(r.get("Cas_Observes", 0)) > 0 and r.geometry is not None
+        if safe_int(r.get("Cas_Observes"), 0) > 0 and r.geometry is not None
     ]
     if heat_data:
         HeatMap(heat_data, radius=20, blur=25, max_zoom=13,
-                gradient={0.0:"blue",0.4:"lime",0.7:"yellow",1.0:"red"}).add_to(m)
+                gradient={0.0: "blue", 0.4: "lime", 0.7: "yellow", 1.0: "red"}
+        ).add_to(m)
 
+    # ── Légende personnalisée ──────────────────────────────────
     mc3 = max(max_cases / 3, 1)
     legend_html = f"""
     <div style="position:fixed;bottom:50px;left:50px;width:240px;background:white;
-         border:2px solid grey;z-index:9999;font-size:13px;padding:12px;
-         border-radius:6px;box-shadow:2px 2px 6px rgba(0,0,0,0.3);">
+    border:2px solid grey;z-index:9999;font-size:13px;padding:12px;
+    border-radius:6px;box-shadow:2px 2px 6px rgba(0,0,0,0.3);">
       <p style="margin:0 0 8px;font-weight:bold;">📊 Légende</p>
-      <p style="margin:4px 0;"><span style="background:#e8f5e9;padding:2px 10px;
-         border:1px solid #ccc;">Faible</span> 0 – {mc3:.0f} cas</p>
-      <p style="margin:4px 0;"><span style="background:#ffeb3b;padding:2px 10px;
-         border:1px solid #ccc;">Moyen</span> {mc3:.0f} – {2*mc3:.0f} cas</p>
-      <p style="margin:4px 0;"><span style="background:#f44336;color:white;
-         padding:2px 10px;">Élevé</span> &gt; {2*mc3:.0f} cas</p>
+      <p style="margin:4px 0;"><span style="background:#e8f5e9;padding:2px 10px;border:1px solid #ccc;">Faible</span> 0–{mc3:.0f} cas</p>
+      <p style="margin:4px 0;"><span style="background:#ffeb3b;padding:2px 10px;border:1px solid #ccc;">Moyen</span> {mc3:.0f}–{2*mc3:.0f} cas</p>
+      <p style="margin:4px 0;"><span style="background:#f44336;color:white;padding:2px 10px;">Élevé</span> &gt; {2*mc3:.0f} cas</p>
       <hr style="margin:8px 0;">
-      <p style="margin:4px 0;color:#d32f2f;">
-        <b>⚠️ Seuil alerte :</b> {seuil_alerte_epidemique} cas/sem</p>
+      <p style="margin:4px 0;color:#d32f2f;"><b>⚠️ Seuil alerte :</b> {seuil_alerte_epidemique} cas/sem.</p>
     </div>"""
-# ✅ CORRECT — tout à 4 espaces dans with tab2
-        m.get_root().html.add_child(folium.Element(legend_html))
+    m.get_root().html.add_child(folium.Element(legend_html))
 
-        st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
+    # ── Affichage de la carte ──────────────────────────────────
+    st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            nal = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
-            st.metric("⚠️ Aires en alerte", nal, f"{nal/len(sa_gdf)*100:.1f}%")
-        with col2:
-            nsc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
-            st.metric("✅ Aires sans cas", nsc, f"{nsc/len(sa_gdf)*100:.1f}%")
-        with col3:
-            d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
-            st.metric("👥 Densité moy.", fmt_val(d_moy, ".1f", " hab/km²"))
+    # ── Métriques synthèse ─────────────────────────────────────
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        nal = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
+        st.metric("⚠️ Aires en alerte", nal, f"{nal/len(sa_gdf)*100:.1f}%")
+    with col2:
+        nsc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
+        st.metric("✅ Aires sans cas", nsc, f"{nsc/len(sa_gdf)*100:.1f}%")
+    with col3:
+        d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
+        st.metric("👥 Densité moy.", fmt_val(d_moy, "{:.1f}", " hab/km²"))
 
-# ============================================================
-# PARTIE 5/5 - TAB3 : MODÉLISATION PRÉDICTIVE
-# CORRECTION BUG 2 : indentation du with st.spinner corrigée
-# CORRECTION BUG 3 : heat_data_pred protégé contre NameError
 # ============================================================
 with tab3:
     st.header("🔮 Modélisation Prédictive par Semaines Épidémiologiques")
