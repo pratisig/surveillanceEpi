@@ -1660,19 +1660,22 @@ with tab2:
       <p style="margin:4px 0;color:#d32f2f;">
         <b>⚠️ Seuil alerte :</b> {seuil_alerte_epidemique} cas/sem</p>
     </div>"""
-    m.get_root().html.add_child(folium.Element(legend_html))
+# ✅ CORRECT — tout à 4 espaces dans with tab2
+        m.get_root().html.add_child(folium.Element(legend_html))
+
         st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        n_al = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
-        st.metric("🚨 Aires en alerte", n_al, f"{n_al/len(sa_gdf)*100:.1f}%")
-    with col2:
-        n_sc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
-        st.metric("✅ Aires sans cas", n_sc, f"{n_sc/len(sa_gdf)*100:.1f}%")
-    with col3:
-        d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
-        st.metric("📍 Densité moy.", fmt_val(d_moy, "{:.1f}", " hab/km²"))
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            nal = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
+            st.metric("⚠️ Aires en alerte", nal, f"{nal/len(sa_gdf)*100:.1f}%")
+        with col2:
+            nsc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
+            st.metric("✅ Aires sans cas", nsc, f"{nsc/len(sa_gdf)*100:.1f}%")
+        with col3:
+            d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
+            st.metric("👥 Densité moy.", fmt_val(d_moy, ".1f", " hab/km²"))
+
 # ============================================================
 # PARTIE 5/5 - TAB3 : MODÉLISATION PRÉDICTIVE
 # CORRECTION BUG 2 : indentation du with st.spinner corrigée
