@@ -578,16 +578,22 @@ with st.spinner('Chargement données de cas...'):
                 df_raw = df_raw.rename(columns=rename_dict)
                 st.sidebar.success(f"🔄 Colonnes renommées : {len(rename_dict)}")
             
-            # ====== VÉRIFIER FORMAT AGRÉGÉ OU LINELIST ======
-            if 'Semaine_Epi' in df_raw.columns and 'Cas_Total' in df_raw.columns:
+           # ====== VÉRIFIER FORMAT AGRÉGÉ OU LINELIST ======
+            if 'Semaine_Epi' in df_raw.columns and ('Cas_Total' in df_raw.columns or 'cas' in df_raw.columns):
                 # FORMAT AGRÉGÉ - Expansion en linelist
                 st.sidebar.info("📊 Format agrégé détecté - Expansion en linelist...")
+                
+                # Normaliser le nom de la colonne cas
+                if 'Cas_Total' not in df_raw.columns:
+                    for col in ['cas', 'Cas', 'cases', 'Cases', 'nb_cas']:
+                        if col in df_raw.columns:
+                            df_raw['Cas_Total'] = df_raw[col]
+                            break
                 
                 expanded_rows = []
                 lignes_ignorees = 0
                 
                 for _, row in df_raw.iterrows():
-                    # ⚠️ CORRECTION : Vérifier les NaN avant conversion
                     try:
                         aire = row.get('health_area') or row.get('Aire_Sante', 'Inconnu')
                         
@@ -597,6 +603,11 @@ with st.spinner('Chargement données de cas...'):
                             lignes_ignorees += 1
                             continue
                         semaine = int(semaine_val)
+                        
+                        # Valider que la semaine est entre 1 et 53
+                        if semaine < 1 or semaine > 53:
+                            lignes_ignorees += 1
+                            continue
                         
                         # Vérifier cas total
                         cas_total_val = row.get('Cas_Total')
@@ -608,24 +619,42 @@ with st.spinner('Chargement données de cas...'):
                         # Vérifier année
                         annee_val = row.get('Annee')
                         if pd.isna(annee_val):
-                            annee = 2024  # Valeur par défaut
+                            annee = datetime.now().year  # Année courante par défaut
                         else:
                             annee = int(annee_val)
                         
-                        # Créer une date fictive pour la semaine
+                        # Valider l'année (entre 2000 et année courante + 1)
+                        if annee < 2000 or annee > datetime.now().year + 1:
+                            st.warning(f"⚠️ Année invalide détectée : {annee} pour aire {aire}, semaine {semaine}")
+                            lignes_ignorees += 1
+                            continue
+                        
+                        # Créer une date fictive pour la semaine ISO
                         try:
+                            # Méthode ISO : année-Semaine-Jour (lundi = 1)
                             base_date = datetime.strptime(f"{annee}-W{semaine:02d}-1", "%Y-W%W-%w")
                         except:
-                            base_date = datetime(int(annee), 1, 1) + timedelta(weeks=semaine-1)
+                            try:
+                                # Méthode alternative : 1er jour de l'année + (semaine-1) * 7 jours
+                                base_date = datetime(int(annee), 1, 1) + timedelta(weeks=semaine-1)
+                            except:
+                                lignes_ignorees += 1
+                                continue
                         
                         # Créer cas_total lignes individuelles
                         for i in range(cas_total):
+                            # Répartir les cas aléatoirement sur les 7 jours de la semaine
+                            jour_aleatoire = np.random.randint(0, 7)
+                            date_cas = base_date + timedelta(days=jour_aleatoire)
+                            
                             expanded_rows.append({
                                 'ID_Cas': len(expanded_rows) + 1,
-                                'Date_Debut_Eruption': base_date + timedelta(days=np.random.randint(0, 7)),
-                                'Date_Notification': base_date + timedelta(days=np.random.randint(0, 10)),
+                                'Date_Debut_Eruption': date_cas,
+                                'Date_Notification': date_cas + timedelta(days=np.random.randint(0, 10)),
                                 'Aire_Sante': aire,
-                                'Age_Mois': 24,  # Valeur par défaut
+                                'Annee': annee,
+                                'Semaine_Epi': semaine,
+                                'Age_Mois': np.random.randint(6, 180),  # Âge aléatoire entre 6 mois et 15 ans
                                 'Statut_Vaccinal': 'Inconnu',
                                 'Sexe': 'Inconnu',
                                 'Issue': 'Inconnu'
@@ -640,23 +669,56 @@ with st.spinner('Chargement données de cas...'):
                 
                 if len(expanded_rows) == 0:
                     st.error("❌ Aucune donnée valide trouvée dans le CSV")
-                    st.info("""
-                    **Vérifications nécessaires :**
-                    - La colonne `Semaine_Epi` doit contenir des nombres entre 1 et 53
-                    - La colonne `Cas_Total` doit contenir des nombres > 0
-                    - La colonne `Annee` doit contenir des années valides
-                    - Aucune cellule ne doit être vide dans ces colonnes
-                    """)
                     
-                    with st.expander("🔍 Aperçu de vos données"):
-                        st.write("**Premières lignes :**")
+                    with st.expander("🔍 Aperçu et diagnostic"):
+                        st.write("**Premières lignes du fichier :**")
                         st.dataframe(df_raw.head(10))
-                        st.write("**Valeurs manquantes par colonne :**")
-                        st.write(df_raw.isnull().sum())
+                        
+                        st.write("**Statistiques des colonnes :**")
+                        col_info = pd.DataFrame({
+                            'Colonne': df_raw.columns,
+                            'Type': df_raw.dtypes.values,
+                            'Valeurs manquantes': df_raw.isnull().sum().values,
+                            'Valeurs uniques': [df_raw[col].nunique() for col in df_raw.columns]
+                        })
+                        st.dataframe(col_info)
+                        
+                        st.info("""
+                        **Format attendu (agrégé) :**
+                        - `health_area` ou `Aire_Sante` : nom de l'aire de santé
+                        - `Semaine_Epi` : numéro de semaine (1 à 52)
+                        - `Annee` : année (ex: 2024)
+                        - `Cas_Total` ou `cas` : nombre de cas (> 0)
+                        
+                        **Exemple de ligne valide :**
+                        | health_area | Semaine_Epi | Annee | Cas_Total |
+                        |-------------|-------------|-------|-----------|
+                        | Dakar       | 15          | 2024  | 12        |
+                        """)
                     
                     st.stop()
                 
                 df = pd.DataFrame(expanded_rows)
+                st.sidebar.success(f"✅ Expansion : {len(df)} cas individuels créés ({len(df['Aire_Sante'].unique())} aires, {len(df.groupby(['Annee', 'Semaine_Epi']))} semaines)")
+                
+                # Afficher un résumé de la période couverte
+                periode_debut = df.groupby(['Annee', 'Semaine_Epi']).size().reset_index().iloc[0]
+                periode_fin = df.groupby(['Annee', 'Semaine_Epi']).size().reset_index().iloc[-1]
+                st.sidebar.info(f"📅 Période : S{periode_debut['Semaine_Epi']:02d}/{periode_debut['Annee']} → S{periode_fin['Semaine_Epi']:02d}/{periode_fin['Annee']}")
+            
+            elif 'Date_Debut_Eruption' in df_raw.columns:
+                # FORMAT LINELIST STANDARD
+                df = df_raw.copy()
+                for col in ['Date_Debut_Eruption', 'Date_Notification']:
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
+                
+                # Créer les colonnes Semaine_Epi et Annee si elles n'existent pas
+                if 'Semaine_Epi' not in df.columns:
+                    df['Semaine_Epi'] = df['Date_Debut_Eruption'].dt.isocalendar().week
+                if 'Annee' not in df.columns:
+                    df['Annee'] = df['Date_Debut_Eruption'].dt.isocalendar().year
+
                 st.sidebar.success(f"✅ Expansion : {len(df)} cas individuels créés")
             
             elif 'Date_Debut_Eruption' in df_raw.columns:
@@ -1299,48 +1361,117 @@ with col5:
     pct_aires = (n_aires_touchees / len(sa_gdf)) * 100
     st.metric("🗺️ Aires touchées", f"{n_aires_touchees}/{len(sa_gdf)}", delta=f"{pct_aires:.0f}%")
 
-# Agrégation par aire
-agg_dict = {"ID_Cas": "count"}
+# ============================================================
+# TOP 10 AIRES DE SANTÉ
+# ============================================================
 
-if "Age_Mois" in df.columns:
-    agg_dict["Age_Mois"] = "mean"
+st.subheader("🏆 Top 10 Aires de Santé")
 
-if "Statut_Vaccinal" in df.columns:
-    agg_dict["Statut_Vaccinal"] = lambda x: (x == "Non").mean() * 100
+# Calculer les statistiques par aire
+cases_by_area = df.groupby('Aire_Sante').agg(
+    Cas_Observes=('ID_Cas', 'count')
+).reset_index()
 
-cases_by_area = df.groupby("Aire_Sante").agg(agg_dict).reset_index()
-
-# Renommer les colonnes selon ce qui est présent
-rename_map = {"ID_Cas": "Cas_Observes"}
-if "Age_Mois" in cases_by_area.columns:
-    rename_map["Age_Mois"] = "Age_Moyen"
-if "Statut_Vaccinal" in cases_by_area.columns:
-    rename_map["Statut_Vaccinal"] = "Taux_Non_Vaccines"
-
-cases_by_area = cases_by_area.rename(columns=rename_map)
-
-# Ajouter des colonnes par défaut si absentes
-if "Taux_Non_Vaccines" not in cases_by_area.columns:
-    cases_by_area["Taux_Non_Vaccines"] = 0
-if "Age_Moyen" not in cases_by_area.columns:
-    cases_by_area["Age_Moyen"] = 0
-
-cases_by_area.columns = ["Aire_Sante", "Cas_Observes", "Taux_Non_Vaccines", "Age_Moyen"]
-
-sa_gdf_with_cases = sa_gdf_enrichi.merge(
-    cases_by_area,
-    left_on="health_area",
-    right_on="Aire_Sante",
-    how="left"
+# Fusionner avec les données géographiques pour avoir la population
+cases_by_area = cases_by_area.merge(
+    sa_gdf_enrichi[['health_area', 'Pop_Totale', 'Pop_Enfants']],
+    left_on='Aire_Sante',
+    right_on='health_area',
+    how='left'
 )
 
-sa_gdf_with_cases["Cas_Observes"] = sa_gdf_with_cases["Cas_Observes"].fillna(0)
-sa_gdf_with_cases["Taux_Non_Vaccines"] = sa_gdf_with_cases["Taux_Non_Vaccines"].fillna(0)
+# Calculer le taux d'attaque pour 10 000 habitants
+cases_by_area['Taux_Attaque_10K'] = (
+    (cases_by_area['Cas_Observes'] / cases_by_area['Pop_Totale'].replace(0, np.nan)) * 10000
+).fillna(0)
 
-sa_gdf_with_cases["Taux_Attaque_10000"] = (
-    sa_gdf_with_cases["Cas_Observes"] /
-    sa_gdf_with_cases["Pop_Enfants"].replace(0, np.nan) * 10000
-).replace([np.inf, -np.inf], np.nan)
+# Calculer le taux d'attaque pour 10 000 enfants
+cases_by_area['Taux_Attaque_Enfants_10K'] = (
+    (cases_by_area['Cas_Observes'] / cases_by_area['Pop_Enfants'].replace(0, np.nan)) * 10000
+).fillna(0)
+
+# Créer deux onglets
+tab1, tab2 = st.tabs(["📈 Par Taux d'Attaque", "🔢 Par Nombre de Cas"])
+
+with tab1:
+    st.markdown("**Top 10 - Aires avec le plus haut taux d'attaque (pour 10 000 habitants)**")
+    
+    top10_taux = cases_by_area.nlargest(10, 'Taux_Attaque_10K')
+    
+    fig_taux = px.bar(
+        top10_taux,
+        x='Taux_Attaque_10K',
+        y='Aire_Sante',
+        orientation='h',
+        title='Top 10 - Taux d\'attaque le plus élevé',
+        labels={'Taux_Attaque_10K': 'Taux pour 10K hab.', 'Aire_Sante': 'Aire de santé'},
+        color='Taux_Attaque_10K',
+        color_continuous_scale='Reds',
+        text='Taux_Attaque_10K'
+    )
+    fig_taux.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+    fig_taux.update_layout(height=500)
+    st.plotly_chart(fig_taux, use_container_width=True)
+    
+    # Tableau détaillé
+    st.dataframe(
+        top10_taux[['Aire_Sante', 'Cas_Observes', 'Pop_Totale', 'Taux_Attaque_10K']]
+        .style.format({
+            'Cas_Observes': '{:.0f}',
+            'Pop_Totale': '{:,.0f}',
+            'Taux_Attaque_10K': '{:.2f}'
+        })
+        .background_gradient(subset=['Taux_Attaque_10K'], cmap='Reds'),
+        use_container_width=True
+    )
+
+with tab2:
+    st.markdown("**Top 10 - Aires avec le plus grand nombre de cas**")
+    
+    top10_cas = cases_by_area.nlargest(10, 'Cas_Observes')
+    
+    fig_cas = px.bar(
+        top10_cas,
+        x='Cas_Observes',
+        y='Aire_Sante',
+        orientation='h',
+        title='Top 10 - Nombre de cas le plus élevé',
+        labels={'Cas_Observes': 'Nombre de cas', 'Aire_Sante': 'Aire de santé'},
+        color='Cas_Observes',
+        color_continuous_scale='Oranges',
+        text='Cas_Observes'
+    )
+    fig_cas.update_traces(textposition='outside')
+    fig_cas.update_layout(height=500)
+    st.plotly_chart(fig_cas, use_container_width=True)
+    
+    # Tableau détaillé
+    st.dataframe(
+        top10_cas[['Aire_Sante', 'Cas_Observes', 'Pop_Totale', 'Taux_Attaque_10K']]
+        .style.format({
+            'Cas_Observes': '{:.0f}',
+            'Pop_Totale': '{:,.0f}',
+            'Taux_Attaque_10K': '{:.2f}'
+        })
+        .background_gradient(subset=['Cas_Observes'], cmap='Oranges'),
+        use_container_width=True
+    )
+
+# Métriques récapitulatives
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    taux_max = cases_by_area['Taux_Attaque_10K'].max()
+    aire_taux_max = cases_by_area.loc[cases_by_area['Taux_Attaque_10K'].idxmax(), 'Aire_Sante']
+    st.metric("Taux d'attaque max", f"{taux_max:.1f}/10K", f"Aire : {aire_taux_max}")
+
+with col2:
+    taux_moyen = cases_by_area['Taux_Attaque_10K'].mean()
+    st.metric("Taux d'attaque moyen", f"{taux_moyen:.1f}/10K")
+
+with col3:
+    aires_alerte = len(cases_by_area[cases_by_area['Taux_Attaque_10K'] > 10])  # Seuil OMS
+    st.metric("Aires en alerte (>10/10K)", aires_alerte, delta_color="inverse")
 
 # Carte de situation actuelle
 st.header("🗺️ Cartographie de la Situation Actuelle")
@@ -1587,71 +1718,69 @@ with col3:
     else:
         st.metric("📉 Variation dernière semaine", "N/A")
 
-# Distribution par âge
-st.subheader("👶 Distribution par Tranches d'Âge")
+# ============================================================
+# DISTRIBUTION PAR TRANCHES D'ÂGE (SI DISPONIBLE)
+# ============================================================
 
-if "Age_Mois" in df.columns:
-    df["Tranche_Age"] = pd.cut(
-        df["Age_Mois"],
+# Vérifier si les données d'âge sont disponibles et valides
+age_disponible = 'Age_Mois' in df.columns and df['Age_Mois'].notna().sum() > 0 and (df['Age_Mois'] > 0).sum() > 0
+
+if age_disponible:
+    st.subheader("📊 Distribution par Tranches d'Âge")
+    
+    df['Tranche_Age'] = pd.cut(
+        df['Age_Mois'],
         bins=[0, 12, 60, 120, 180],
-        labels=["0-1 an", "1-5 ans", "5-10 ans", "10-15 ans"]
+        labels=['0-1 an', '1-5 ans', '5-10 ans', '10-15 ans']
     )
-    age_available = True
-else:
-    df["Tranche_Age"] = "Inconnu"
-    age_available = False
-
-agg_dict_age = {"ID_Cas": "count"}
-
-if "Statut_Vaccinal" in df.columns:
-    agg_dict_age["Statut_Vaccinal"] = lambda x: (x == "Non").mean() * 100
-
-age_stats = df.groupby("Tranche_Age").agg(agg_dict_age).reset_index()
-
-rename_map_age = {"ID_Cas": "Nombre_Cas"}
-if "Statut_Vaccinal" in age_stats.columns:
-    rename_map_age["Statut_Vaccinal"] = "Pct_Non_Vaccines"
-
-age_stats = age_stats.rename(columns=rename_map_age)
-
-if "Pct_Non_Vaccines" not in age_stats.columns:
-    age_stats["Pct_Non_Vaccines"] = 0
-
-col1, col2 = st.columns(2)
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if age_available:
+    
+    agg_dict_age = {'ID_Cas': 'count'}
+    
+    # Ajouter vaccination seulement si disponible
+    if 'Statut_Vaccinal' in df.columns and df['Statut_Vaccinal'].notna().sum() > 0:
+        agg_dict_age['Statut_Vaccinal'] = lambda x: ((x == 'Non').sum() / len(x) * 100) if len(x) > 0 else 0
+    
+    age_stats = df.groupby('Tranche_Age').agg(agg_dict_age).reset_index()
+    
+    rename_map_age = {'ID_Cas': 'Nombre_Cas'}
+    if 'Statut_Vaccinal' in age_stats.columns:
+        rename_map_age['Statut_Vaccinal'] = 'Pct_Non_Vaccines'
+    
+    age_stats = age_stats.rename(columns=rename_map_age)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
         fig_age = px.bar(
             age_stats,
-            x="Tranche_Age",
-            y="Nombre_Cas",
-            title="Cas par tranche d'âge",
-            color="Nombre_Cas",
-            color_continuous_scale="Reds",
-            text="Nombre_Cas"
+            x='Tranche_Age',
+            y='Nombre_Cas',
+            title='Cas par tranche d\'âge',
+            color='Nombre_Cas',
+            color_continuous_scale='Reds',
+            text='Nombre_Cas'
         )
         fig_age.update_traces(textposition='outside')
         st.plotly_chart(fig_age, use_container_width=True)
-    else:
-        st.info("ℹ️ Données d'âge non disponibles")
+    
+    with col2:
+        if 'Pct_Non_Vaccines' in age_stats.columns and age_stats['Pct_Non_Vaccines'].sum() > 0:
+            fig_vacc_age = px.bar(
+                age_stats,
+                x='Tranche_Age',
+                y='Pct_Non_Vaccines',
+                title='% non vaccinés par âge',
+                color='Pct_Non_Vaccines',
+                color_continuous_scale='Oranges',
+                text='Pct_Non_Vaccines'
+            )
+            fig_vacc_age.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            st.plotly_chart(fig_vacc_age, use_container_width=True)
+        else:
+            st.info("ℹ️ Données de vaccination par âge non disponibles")
+else:
+    st.info("ℹ️ Données d'âge non disponibles - Section âge masquée")
 
-with col2:
-    if age_available and age_stats["Pct_Non_Vaccines"].sum() > 0:
-        fig_vacc_age = px.bar(
-            age_stats,
-            x="Tranche_Age",
-            y="Pct_Non_Vaccines",
-            title="% non vaccinés par âge",
-            color="Pct_Non_Vaccines",
-            color_continuous_scale="Oranges",
-            text="Pct_Non_Vaccines"
-        )
-        fig_vacc_age.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-        st.plotly_chart(fig_vacc_age, use_container_width=True)
-    else:
-        st.info("ℹ️ Données de vaccination par âge non disponibles")
 # ============================================================
 # PYRAMIDE DES ÂGES POPULATION (WORLDPOP)
 # ============================================================
