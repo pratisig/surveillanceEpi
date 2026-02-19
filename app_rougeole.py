@@ -215,16 +215,15 @@ pays_selectionne = None
 iso3_pays = None
 if option_aire == "Fichier local (ao_hlthArea.zip)":
     pays_selectionne = st.sidebar.selectbox(
-        "🌍 Sélectionner le pays",
-        list(PAYS_ISO3_MAP.keys()),
-        key='pays_select'
-    )
-    iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
-    pays_change = (st.session_state.pays_precedent != pays_selectionne)
-    if pays_change:
-        st.session_state.pays_precedent = pays_selectionne
-        st.session_state.sa_gdf_cache = None
-        st.rerun()
+    "🌍 Sélectionner le pays",
+    list(PAYS_ISO3_MAP.keys()),
+    key='pays_select'
+)
+iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
+# CORRECTION : on met à jour le cache SANS rerun si le pays change
+if st.session_state.pays_precedent != pays_selectionne:
+    st.session_state.pays_precedent = pays_selectionne
+    st.session_state.sa_gdf_cache = None
 
 upload_file = None
 if option_aire == "Upload personnalisé":
@@ -1641,7 +1640,9 @@ with tab2:
     </div>"""
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole")
+    st_folium(m, width=1400, height=650,
+          key="carte_situation_actuelle_rougeole",
+          returned_objects=[])
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -2121,7 +2122,9 @@ with tab3:
                 </div>""", max_width=300),
                 icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")
             ).add_to(m_risque)
-        st_folium(m_risque, width=1200, height=600, key="carte_risque_rougeole")
+        st_folium(m_risque, width=1200, height=600,
+          key="carte_risque_rougeole",
+          returned_objects=[]
         st.error(f"🚨 **{len(aires_critiques)} aires identifiées à risque élevé** - Intervention prioritaire recommandée")
     else:
         st.success("✅ Aucune zone à risque élevé identifiée dans les prédictions")
@@ -2150,7 +2153,9 @@ with tab3:
             gradient={0.0: "blue", 0.3: "lime", 0.5: "yellow",
                       0.7: "orange", 1.0: "red"}
         ).add_to(m_heat)
-        st_folium(m_heat, width=1200, height=600, key="heatmap_chaleur_pred_rougeole")
+        st_folium(m_heat, width=1200, height=600,
+          key="heatmap_chaleur_pred_rougeole",
+          returned_objects=[])
         st.info("💡 Les zones rouges/oranges indiquent les concentrations de cas prédits les plus élevées")
 
     # ── Alertes et Recommandations ────────────────────────────
