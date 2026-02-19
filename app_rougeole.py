@@ -512,17 +512,20 @@ def generate_dummy_vaccination(_sa_gdf):
         "Taux_Vaccination": np.random.beta(a=8, b=2, size=len(_sa_gdf)) * 100
     })
 
-# ── Chargement des données de cas ─────────────────────────────
+# Chargement des données de cas
 with st.spinner("📥 Chargement données de cas..."):
     if mode_demo == "🧪 Mode démo (données simulées)":
         df = generate_dummy_linelists(sa_gdf)
         vaccination_df = generate_dummy_vaccination(sa_gdf)
         st.sidebar.info(f"📊 {len(df)} cas simulés générés")
+
     else:
         if linelist_file is None:
             st.error("❌ Veuillez uploader un fichier CSV de lineliste")
             st.stop()
+
         try:
+            # ── Détection séparateur ──────────────────────────
             sep = detect_separator(linelist_file)
             try:
                 df_raw = pd.read_csv(linelist_file, sep=sep, encoding="utf-8", low_memory=False)
@@ -530,20 +533,23 @@ with st.spinner("📥 Chargement données de cas..."):
                 linelist_file.seek(0)
                 df_raw = pd.read_csv(linelist_file, sep=sep, encoding="latin-1", low_memory=False)
 
+            # ── Normalisation des noms de colonnes ────────────
             df_raw = normaliser_colonnes(df_raw, COLONNES_MAPPING)
 
-            # CAS A : données historiques agrégées Semaine_Epi + Annee + Cas_Total
+            # ── Détection colonne cas ─────────────────────────
             cas_col = None
-            if "Cas_Total" in df_raw.columns:
-                cas_col = "Cas_Total"
-            elif "Cas" in df_raw.columns:
-                cas_col = "Cas"
+            for _c in ["Cas_Total", "Cas", "cases", "Cases", "nb_cas", "nombre_cas"]:
+                if _c in df_raw.columns:
+                    cas_col = _c
+                    break
 
+            # ── CAS A : données agrégées Semaine_Epi + Cas_Total ──
             if "Semaine_Epi" in df_raw.columns and cas_col:
-                # CORRECTION 2 : nettoyage NaN avant conversion int
+
+                # CORRECTION : nettoyage COMPLET avant toute conversion int()
                 df_raw["Semaine_Epi"] = pd.to_numeric(df_raw["Semaine_Epi"], errors="coerce")
                 df_raw = df_raw[df_raw["Semaine_Epi"].between(1, 52, inclusive="both")].copy()
-                df_raw["Semaine_Epi"] = df_raw["Semaine_Epi"].fillna(0).astype(int)
+                df_raw["Semaine_Epi"] = df_raw["Semaine_Epi"].fillna(1).astype(int)
 
                 if "Annee" in df_raw.columns:
                     df_raw["Annee"] = pd.to_numeric(df_raw["Annee"], errors="coerce")
@@ -552,39 +558,50 @@ with st.spinner("📥 Chargement données de cas..."):
                 else:
                     df_raw["Annee"] = datetime.now().year
 
+                if "Aire_Sante" not in df_raw.columns:
+                    for _ac in ["health_area","name_fr","aire","zone_sante","district","localite"]:
+                        if _ac in df_raw.columns:
+                            df_raw["Aire_Sante"] = df_raw[_ac]
+                            break
+                    else:
+                        df_raw["Aire_Sante"] = sa_gdf["health_area"].iloc[0]
+
                 expanded_rows = []
                 for _, row in df_raw.iterrows():
-                    aire = row.get("Aire_Sante") or row.get("health_area") or row.get("name_fr")
-                    semaine = int(row["Semaine_Epi"])
-                    annee   = int(row.get("Annee", datetime.now().year))
-                    # CORRECTION 2 : fillna(0) avant int() pour éviter NaN→int error
-                    cas_total = int(pd.to_numeric(row.get(cas_col, 0), errors="coerce") or 0)
-                    deces     = int(pd.to_numeric(row.get("Deces", 0), errors="coerce") or 0)
+                    aire    = row.get("Aire_Sante", "Inconnu")
+                    semaine = int(row["Semaine_Epi"])   # ✅ déjà nettoyé
+                    annee   = int(row["Annee"])         # ✅ déjà nettoyé
+
+                    # CORRECTION : fillna + coerce avant int() sur cas/décès
+                    cas_total = int(max(0, pd.to_numeric(row.get(cas_col, 0), errors="coerce") or 0))
+                    deces     = int(max(0, pd.to_numeric(row.get("Deces",     0), errors="coerce") or 0))
+
                     base_date = semaine_vers_date(annee, semaine)
+
                     for i in range(cas_total):
                         issue = "Décédé" if i < deces else "Guéri"
                         expanded_rows.append({
-                            "ID_Cas": len(expanded_rows) + 1,
-                            "Semaine_Epi": semaine,
-                            "Annee": annee,
+                            "ID_Cas":              len(expanded_rows) + 1,
+                            "Semaine_Epi":         semaine,
+                            "Annee":               annee,
                             "Date_Debut_Eruption": base_date + timedelta(days=int(np.random.randint(0, 7))),
                             "Date_Notification":   base_date + timedelta(days=int(np.random.randint(0, 10))),
-                            "Aire_Sante": aire,
-                            "Age_Mois": np.nan,          # pas disponible dans CSV agrégé
-                            "Statut_Vaccinal": "Inconnu",
-                            "Sexe": "Inconnu",
-                            "Issue": issue
+                            "Aire_Sante":          aire,
+                            "Age_Mois":            np.nan,        # indisponible en agrégé
+                            "Statut_Vaccinal":     "Inconnu",
+                            "Sexe":                "Inconnu",
+                            "Issue":               issue
                         })
                 df = pd.DataFrame(expanded_rows)
 
-            # CAS B : linelist individuelle avec Date_Debut_Eruption
+            # ── CAS B : linelist individuelle avec Date_Debut_Eruption ──
             elif "Date_Debut_Eruption" in df_raw.columns:
                 df = df_raw.copy()
                 for col in ["Date_Debut_Eruption", "Date_Notification"]:
                     if col in df.columns:
                         df[col] = pd.to_datetime(df[col], errors='coerce')
 
-            # CAS C : tentative générique
+            # ── CAS C : tentative détection automatique date ──
             else:
                 st.warning("⚠️ Format CSV non standard — tentative de détection automatique...")
                 df = df_raw.copy()
@@ -594,10 +611,10 @@ with st.spinner("📥 Chargement données de cas..."):
                         if test_dates.notna().sum() > len(df) * 0.5:
                             df["Date_Debut_Eruption"] = test_dates
                             break
-                    except:
+                    except Exception:
                         continue
                 if "Date_Debut_Eruption" not in df.columns:
-                    st.error("❌ Impossible de détecter une colonne date ou semaine valide.")
+                    st.error("❌ Impossible de détecter une colonne date ou semaine valide dans ce fichier.")
                     st.stop()
 
             st.sidebar.success(f"✓ {len(df)} cas chargés")
@@ -606,6 +623,7 @@ with st.spinner("📥 Chargement données de cas..."):
             st.error(f"❌ Erreur CSV : {e}")
             st.stop()
 
+        # ── Vaccination ───────────────────────────────────────
         if vaccination_file is not None:
             try:
                 sep_vax = detect_separator(vaccination_file)
@@ -618,7 +636,7 @@ with st.spinner("📥 Chargement données de cas..."):
         else:
             if "Statut_Vaccinal" in df.columns and (df["Statut_Vaccinal"] != "Inconnu").sum() > 0:
                 vacc_by_area = df.groupby("Aire_Sante").agg({
-                    "Statut_Vaccinal": lambda x: ((x == "Non").sum() / len(x) * 100) if len(x) > 0 else 0
+                    "Statut_Vaccinal": lambda x: (x == "Non").sum() / len(x) * 100
                 }).reset_index()
                 vacc_by_area.columns = ["health_area", "Taux_Vaccination"]
                 vaccination_df = vacc_by_area
@@ -626,6 +644,7 @@ with st.spinner("📥 Chargement données de cas..."):
             else:
                 vaccination_df = None
                 st.sidebar.info("ℹ️ Pas de données de vaccination")
+
 
 # ── Normalisation colonnes ─────────────────────────────────────
 df = normaliser_colonnes(df, COLONNES_MAPPING)
