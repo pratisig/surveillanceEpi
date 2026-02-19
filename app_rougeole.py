@@ -2489,11 +2489,18 @@ aires_sans_pred = gdf_predictions[gdf_predictions['Cas_Predits_Total'].isna()]
 if len(aires_sans_pred) > 0:
     st.warning(f"⚠️ {len(aires_sans_pred)} aires sans prédictions (pas de données historiques)")
 
+# ============================================================
+# CORRECTION : Convertir Categorie_Variation en string AVANT fillna
+# ============================================================
+
+# Convertir la colonne catégorielle en string
+gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].astype(str)
+
 # Remplir les valeurs manquantes
 gdf_predictions['Cas_Predits_Total'] = gdf_predictions['Cas_Predits_Total'].fillna(0).astype(int)
 gdf_predictions['Cas_Predits_Max'] = gdf_predictions['Cas_Predits_Max'].fillna(0).astype(int)
 gdf_predictions['Variation_Pct'] = gdf_predictions['Variation_Pct'].fillna(0)
-gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].fillna('Aucune donnée')
+gdf_predictions['Categorie_Variation'] = gdf_predictions['Categorie_Variation'].replace('nan', 'Aucune donnée')  # Remplacer 'nan' par le texte voulu
 gdf_predictions['Semaine_Pic'] = gdf_predictions['Semaine_Pic'].fillna('N/A')
 
 # Vérifier qu'il y a au moins une prédiction valide
@@ -2552,22 +2559,24 @@ for idx, row in gdf_predictions.iterrows():
         continue
     
     # Couleur selon catégorie
-    if row['Categorie_Variation'] == 'Forte hausse':
+    categorie = row['Categorie_Variation']
+    
+    if categorie == 'Forte hausse':
         color = 'red'
         icon = 'arrow-up'
-    elif row['Categorie_Variation'] == 'Hausse modérée':
+    elif categorie == 'Hausse modérée':
         color = 'orange'
         icon = 'arrow-up'
-    elif row['Categorie_Variation'] == 'Stable':
+    elif categorie == 'Stable':
         color = 'blue'
         icon = 'minus'
-    elif row['Categorie_Variation'] == 'Baisse modérée':
+    elif categorie == 'Baisse modérée':
         color = 'lightgreen'
         icon = 'arrow-down'
-    elif row['Categorie_Variation'] == 'Forte baisse':
+    elif categorie == 'Forte baisse':
         color = 'green'
         icon = 'arrow-down'
-    else:
+    else:  # Aucune donnée ou autre
         color = 'gray'
         icon = 'question'
     
@@ -2598,7 +2607,7 @@ for idx, row in gdf_predictions.iterrows():
             </tr>
             <tr style="background-color:#f0f0f0;">
                 <td colspan="2" style="padding:6px; text-align:center; font-weight:bold;">
-                    {row['Categorie_Variation']}
+                    {categorie}
                 </td>
             </tr>
         </table>
