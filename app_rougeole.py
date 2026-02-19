@@ -702,11 +702,19 @@ df["Semaine_Annee"] = df["Annee"].astype(str) + "-S" + df["Semaine_Epi"].astype(
 df["sort_key"] = df["Annee"] * 100 + df["Semaine_Epi"]
 
 # ── Détection dernière semaine ────────────────────────────────
-derniere_semaine_epi = int(df.loc[df["sort_key"].idxmax(), "Semaine_Epi"])
-derniere_annee       = int(df.loc[df["sort_key"].idxmax(), "Annee"])
-st.sidebar.info(f"📅 Dernière semaine détectée : **S{derniere_semaine_epi:02d} {derniere_annee}**")
+df["sort_key"] = df["Annee"] * 100 + df["Semaine_Epi"]
+idx_last = df["sort_key"].idxmax()
+derniere_semaine_epi = int(df.loc[idx_last, "Semaine_Epi"])
+derniere_annee       = int(df.loc[idx_last, "Annee"])
 
-# ── CORRECTION 3 : Filtres dynamiques (remplace start_date/end_date) ──
+# Nombre de semaines UNIQUES réelles = clé composite Annee+SXX
+n_semaines_uniques = df["Semaine_Annee"].nunique()
+
+st.sidebar.info(
+    f"📅 Dernière semaine : **S{derniere_semaine_epi:02d} {derniere_annee}** | "
+    f"**{n_semaines_uniques}** semaines au total"
+)
+
 st.sidebar.subheader("📅 Filtres Temporels & Géographiques")
 
 annees_dispo   = sorted(df["Annee"].dropna().unique().astype(int).tolist())
@@ -1226,8 +1234,12 @@ with tab1:
 
     st.header("📊 Indicateurs Clés de Performance")
     ann_str = ", ".join(str(a) for a in sorted(set(df["Annee"].dropna().astype(int))))
-    st.caption(f"📌 Analyse : Années **{ann_str}** | **{df['Aire_Sante'].nunique()}** aires | "
-               f"**{df['Semaine_Epi'].nunique()}** semaines | Dernière semaine : **S{derniere_semaine_epi:02d} {derniere_annee}**")
+    st.caption(
+    f"📌 Analyse : Années **{ann_str}** | "
+    f"**{df['Aire_Sante'].nunique()}** aires | "
+    f"**{df['Semaine_Annee'].nunique()}** semaines épidémiologiques uniques | "
+    f"Dernière semaine : **S{derniere_semaine_epi:02d} {derniere_annee}**"
+)
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
@@ -1259,10 +1271,20 @@ with tab1:
     if "sort_key" not in df.columns:
         df["sort_key"] = df["Annee"] * 100 + df["Semaine_Epi"]
 
-    weekly_cases = df.groupby(["Annee","Semaine_Epi"]).size().reset_index(name="Cas")
-    weekly_cases["sort_key"] = weekly_cases["Annee"] * 100 + weekly_cases["Semaine_Epi"]
-    weekly_cases["Semaine_Label"] = (weekly_cases["Annee"].astype(str) + "-S" +
-                                     weekly_cases["Semaine_Epi"].astype(str).str.zfill(2))
+    weekly_cases = (
+    df.groupby(["Annee", "Semaine_Epi"])
+    .size()
+    .reset_index(name="Cas")
+)
+# Clé de tri chronologique réelle (Annee * 100 + Semaine)
+weekly_cases["sort_key"]     = weekly_cases["Annee"] * 100 + weekly_cases["Semaine_Epi"]
+# Label affiché : "2018-S01" … "2024-S52" — UNIQUE pour chaque semaine de chaque année
+weekly_cases["Semaine_Label"] = (
+    weekly_cases["Annee"].astype(str) + "-S" +
+    weekly_cases["Semaine_Epi"].astype(str).str.zfill(2)
+)
+weekly_cases = weekly_cases.sort_values("sort_key").reset_index(drop=True)
+
     weekly_cases = weekly_cases.sort_values("sort_key")
 
     fig_epi = go.Figure()
@@ -1725,10 +1747,18 @@ with tab3:
         Age_Moyen=("Age_Mois", "mean")
     ).reset_index()
 
-    weekly_features['Semaine_Label'] = (
-        weekly_features['Annee'].astype(str) + '-S' +
-        weekly_features['Semaine_Epi'].astype(str).str.zfill(2)
+    weekly_features["sort_key"] = (
+    weekly_features["Annee"] * 100 + weekly_features["Semaine_Epi"]
     )
+    weekly_features["Semaine_Label"] = (
+        weekly_features["Annee"].astype(str) + "-S" +
+        weekly_features["Semaine_Epi"].astype(str).str.zfill(2)
+    )
+    # Tri chronologique correct AVANT calcul des lags
+    weekly_features = weekly_features.sort_values(
+        ["Aire_Sante", "sort_key"]
+    ).reset_index(drop=True)
+
     weekly_features['sort_key'] = (
         weekly_features['Annee'] * 100 + weekly_features['Semaine_Epi']
     )
@@ -2208,10 +2238,26 @@ with tab3:
 
         # ── CORRECTION 3 : Heatmap des PRÉDICTIONS (pas des données épidémio) ──
         st.subheader("🗓️ Heatmap Hebdomadaire des Prédictions")
+        # Tri chronologique avant pivot (sinon colonnes désordonnées)
+        future_df = future_df.sort_values("sort_key").reset_index(drop=True)
+        
         heatmap_data = future_df.pivot_table(
-            values='Predicted_Cases', index='Aire_Sante',
-            columns='Semaine_Label', aggfunc='sum', fill_value=0
+            index="Aire_Sante",
+            columns="Semaine_Label",   # "2024-S53" → "2025-S01" etc. triés correctement
+            values="Predicted_Cases",
+            aggfunc="sum",
+            fill_value=0
         )
+        # Remettre les colonnes en ordre chronologique (sort_key)
+        semaine_order = (
+            future_df[["Semaine_Label","sort_key"]]
+            .drop_duplicates()
+            .sort_values("sort_key")["Semaine_Label"]
+            .tolist()
+        )
+        heatmap_data = heatmap_data[[c for c in semaine_order if c in heatmap_data.columns]]
+        heatmap_data = heatmap_data.round(0).astype(int)
+
         heatmap_data = heatmap_data.round(0).astype(int)
         # Trier les aires par total décroissant
         heatmap_data['_total'] = heatmap_data.sum(axis=1)
