@@ -39,7 +39,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🦠 Dashboard de Surveillance et Prédiction - Rougeole")
+st.title("🦠 Plateforme de Surveillance et Prédiction - Rougeole")
 st.markdown("### Analyse épidémiologique et modélisation prédictive par semaines épidémiologiques")
 
 # Mapping pays ISO3
@@ -1229,7 +1229,7 @@ with tab1:
     st.caption(
         f"📌 Analyse : Années **{ann_str}** | "
         f"**{df['Aire_Sante'].nunique()}** aires | "
-        f"**{df['Semaine_Annee'].nunique()}** semaines épidémiologiques uniques | "
+        f"**{df['Semaine_Annee'].nunique()}** semaines épidémiologiques | "
         f"Dernière semaine : **S{derniere_semaine_epi:02d} {derniere_annee}**"
     )
 
@@ -1354,7 +1354,7 @@ with tab1:
         st.info("ℹ️ Données d'âge non disponibles dans ce fichier")
 
     # ── Top 10 ────────────────────────────────────────────────
-    st.header("🏆 Top 10 des Aires les Plus Touchées")
+    st.header("🏆 10 aires de santés avec le taux d'attaque le plus élevé")
     top_data = sa_gdf_with_cases[["health_area","Cas_Observes","Taux_Attaque_10000"]].copy()
     top_data = top_data[top_data["Cas_Observes"] > 0]
     has_taux = ("Taux_Attaque_10000" in top_data.columns and
