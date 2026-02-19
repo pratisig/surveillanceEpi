@@ -1365,12 +1365,33 @@ with col5:
 # TOP 10 AIRES DE SANTÉ
 # ============================================================
 
+# ============================================================
+# TOP 10 AIRES DE SANTÉ - PAR TAUX D'ATTAQUE ET PAR CAS
+# ============================================================
+
 st.subheader("🏆 Top 10 Aires de Santé")
 
 # Calculer les statistiques par aire
-cases_by_area = df.groupby('Aire_Sante').agg(
-    Cas_Observes=('ID_Cas', 'count')
-).reset_index()
+aggdict = {'ID_Cas': 'count'}
+if 'Age_Mois' in df.columns:
+    aggdict['Age_Mois'] = 'mean'
+if 'Statut_Vaccinal' in df.columns:
+    aggdict['Statut_Vaccinal'] = lambda x: ((x == 'Non').sum() / len(x) * 100)
+
+cases_by_area = df.groupby('Aire_Sante').agg(aggdict).reset_index()
+
+rename_map = {'ID_Cas': 'Cas_Observes'}
+if 'Age_Mois' in cases_by_area.columns:
+    rename_map['Age_Mois'] = 'Age_Moyen'
+if 'Statut_Vaccinal' in cases_by_area.columns:
+    rename_map['Statut_Vaccinal'] = 'Taux_Non_Vaccines'
+
+cases_by_area = cases_by_area.rename(columns=rename_map)
+
+if 'Taux_Non_Vaccines' not in cases_by_area.columns:
+    cases_by_area['Taux_Non_Vaccines'] = 0
+if 'Age_Moyen' not in cases_by_area.columns:
+    cases_by_area['Age_Moyen'] = 0
 
 # Fusionner avec les données géographiques pour avoir la population
 cases_by_area = cases_by_area.merge(
@@ -1473,8 +1494,26 @@ with col3:
     aires_alerte = len(cases_by_area[cases_by_area['Taux_Attaque_10K'] > 10])  # Seuil OMS
     st.metric("Aires en alerte (>10/10K)", aires_alerte, delta_color="inverse")
 
-# Carte de situation actuelle
-st.header("🗺️ Cartographie de la Situation Actuelle")
+# ============================================================
+# FUSION AVEC LE GEODATAFRAME (IMPORTANT - NE PAS SUPPRIMER)
+# ============================================================
+
+sa_gdf_with_cases = sa_gdf_enrichi.merge(
+    cases_by_area,
+    left_on='health_area',
+    right_on='Aire_Sante',
+    how='left'
+)
+
+sa_gdf_with_cases['Cas_Observes'] = sa_gdf_with_cases['Cas_Observes'].fillna(0)
+sa_gdf_with_cases['Taux_Non_Vaccines'] = sa_gdf_with_cases['Taux_Non_Vaccines'].fillna(0)
+sa_gdf_with_cases['Taux_Attaque_10000'] = sa_gdf_with_cases['Taux_Attaque_10K'].fillna(0)
+
+# ============================================================
+# LA SECTION "CARTOGRAPHIE" COMMENCE ICI
+# ============================================================
+
+st.header("Cartographie de la Situation Actuelle")
 
 center_lat = sa_gdf_with_cases.geometry.centroid.y.mean()
 center_lon = sa_gdf_with_cases.geometry.centroid.x.mean()
