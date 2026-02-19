@@ -1536,6 +1536,7 @@ else:
 # ============================================================
 # CARTOGRAPHIE DE LA SITUATION ACTUELLE
 # ============================================================
+with tab2:
 st.header("🗺️ Cartographie de la Situation Actuelle")
 
 # ── Sécurisation des types avant affichage ────────────────────
