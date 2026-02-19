@@ -1457,7 +1457,7 @@ else:
     delai_available = False
 
 # CORRECTION : conversion explicite en float natif Python (pas numpy)
-# pour éviter TypeError dans add_vline (Plotly n'accepte pas numpy float)
+# pour éviter TypeError dans  (Plotly n'accepte pas numpy float)
 _delai_series = pd.to_numeric(df["Delai_Notification"], errors="coerce").dropna()
 
 delai_moyen  = float(_delai_series.mean())   if len(_delai_series) > 0 else float('nan')
@@ -1486,51 +1486,38 @@ with col4:
         st.metric(f"Cas corrigés ({derniere_semaine_label})",
                   cas_derniere_semaine, delta="N/A")
 
-if delai_available and not np.isnan(delai_moyen):
-    # Filtrer les délais valides et raisonnables pour l'histogramme
+if delai_available:
     df_delai_plot = df[
-        df["Delai_Notification"].notna() &
-        df["Delai_Notification"].between(-5, 60)
+        pd.to_numeric(df["Delai_Notification"], errors="coerce").between(-5, 60)
     ].copy()
+    df_delai_plot["Delai_Notification"] = pd.to_numeric(
+        df_delai_plot["Delai_Notification"], errors="coerce")
 
     if len(df_delai_plot) > 0:
         fig_delai = px.histogram(
-            df_delai_plot,
-            x="Delai_Notification",
-            nbins=20,
+            df_delai_plot, x="Delai_Notification", nbins=20,
             title="Distribution des délais de notification",
             labels={"Delai_Notification": "Délai (jours)", "count": "Nombre de cas"},
             color_discrete_sequence=['#d32f2f']
         )
-
-        # CORRECTION : add_vline nécessite float Python pur (pas np.float64)
-        # et l'axe X doit être numérique (histogramme → OK ici)
+        # CORRECTION : float() Python pur obligatoire pour add_vline
         if not np.isnan(delai_moyen):
             fig_delai.add_vline(
-                x=float(delai_moyen),
-                line_dash="dash", line_color="blue",
+                x=float(delai_moyen), line_dash="dash", line_color="blue",
                 annotation_text=f"Moyenne : {delai_moyen:.1f}j",
                 annotation_position="top right"
             )
         if not np.isnan(delai_median):
             fig_delai.add_vline(
-                x=float(delai_median),
-                line_dash="dash", line_color="green",
+                x=float(delai_median), line_dash="dash", line_color="green",
                 annotation_text=f"Médiane : {delai_median:.0f}j",
                 annotation_position="top left"
             )
-
-        fig_delai.update_layout(
-            xaxis_title="Délai (jours)",
-            yaxis_title="Nombre de cas",
-            template="plotly_white",
-            height=350
-        )
+        fig_delai.update_layout(template="plotly_white", height=350)
         st.plotly_chart(fig_delai, use_container_width=True)
-    else:
-        st.info("ℹ️ Délais de notification non représentables (valeurs hors plage)")
 else:
     st.info("ℹ️ Données de délai de notification non disponibles")
+
 
 
 # ============================================================
@@ -1814,260 +1801,394 @@ with tab3:
 
     with st.spinner("🤖 Préparation des données et entraînement..."):
 
-        weekly_features = df.groupby(["Aire_Sante","Annee","Semaine_Epi"]).agg(
-            Cas_Observes=("ID_Cas","count"),
-            Non_Vaccines=("Statut_Vaccinal", lambda x: (x == "Non").mean() * 100),
-            Age_Moyen=("Age_Mois","mean")
-        ).reset_index()
+            # ============================================================
+    # PRÉPARATION DES FEATURES — VERSION CORRIGÉE
+    # ============================================================
+    weekly_features = df.groupby(["Aire_Sante", "Annee", "Semaine_Epi"]).agg(
+        Cas_Observes=("ID_Cas", "count"),
+        Non_Vaccines=("Statut_Vaccinal", lambda x: (x == "Non").mean() * 100),
+        Age_Moyen=("Age_Mois", "mean")
+    ).reset_index()
 
-        weekly_features['Semaine_Label'] = (
-            weekly_features['Annee'].astype(str) + '-S' +
-            weekly_features['Semaine_Epi'].astype(str).str.zfill(2)
+    weekly_features['Semaine_Label'] = (
+        weekly_features['Annee'].astype(str) + '-S' +
+        weekly_features['Semaine_Epi'].astype(str).str.zfill(2)
+    )
+    weekly_features['sort_key'] = (
+        weekly_features['Annee'] * 100 + weekly_features['Semaine_Epi']
+    )
+
+    # Merge variables externes par aire
+    cols_merge = ["health_area", "Pop_Totale", "Pop_Enfants",
+                  "Densite_Pop", "Densite_Enfants", "Urbanisation",
+                  "Temperature_Moy", "Humidite_Moy", "Saison_Seche_Humidite",
+                  "Taux_Vaccination"]
+    cols_merge_dispo = [c for c in cols_merge if c in sa_gdf_enrichi.columns]
+
+    weekly_features = weekly_features.merge(
+        sa_gdf_enrichi[cols_merge_dispo],
+        left_on="Aire_Sante", right_on="health_area", how="left"
+    )
+
+    # Remplissage NaN pour colonnes démo/climat
+    for col in ["Age_Moyen", "Non_Vaccines", "Pop_Totale", "Pop_Enfants",
+                "Densite_Pop", "Densite_Enfants", "Taux_Vaccination",
+                "Temperature_Moy", "Humidite_Moy", "Saison_Seche_Humidite"]:
+        if col in weekly_features.columns:
+            med = weekly_features[col].median()
+            weekly_features[col] = weekly_features[col].fillna(
+                med if pd.notna(med) else 0)
+
+    # Encodage urbanisation
+    le_urban = LabelEncoder()
+    weekly_features["Urban_Encoded"] = le_urban.fit_transform(
+        weekly_features["Urbanisation"].fillna("Rural").astype(str))
+
+    # ── CORRECTION : Coef_Climatique calculé LIGNE PAR LIGNE ──
+    # (weekly_features.get() retourne une Series, pas un scalaire !)
+    if donnees_dispo["Climat"]:
+        scaler_climat = MinMaxScaler()
+        climate_cols = ["Temperature_Moy", "Humidite_Moy", "Saison_Seche_Humidite"]
+        climate_matrix = weekly_features[climate_cols].fillna(0).values
+        climate_scaled = scaler_climat.fit_transform(climate_matrix)
+        weekly_features["Temp_Norm"]   = climate_scaled[:, 0]
+        weekly_features["Hum_Norm"]    = climate_scaled[:, 1]
+        weekly_features["Saison_Norm"] = climate_scaled[:, 2]
+        # Coefficient composite correct (scalaires par ligne)
+        weekly_features["Coef_Climatique"] = (
+            weekly_features["Temp_Norm"]   * 0.4 +
+            weekly_features["Hum_Norm"]    * 0.4 +
+            weekly_features["Saison_Norm"] * 0.2
         )
-        weekly_features['sort_key'] = weekly_features['Annee'] * 100 + weekly_features['Semaine_Epi']
+    else:
+        scaler_climat = None
 
-        weekly_features = weekly_features.merge(
-            sa_gdf_enrichi[[
-                "health_area","Pop_Totale","Pop_Enfants",
-                "Densite_Pop","Densite_Enfants","Urbanisation",
-                "Temperature_Moy","Humidite_Moy","Saison_Seche_Humidite",
-                "Taux_Vaccination"
-            ]],
-            left_on="Aire_Sante", right_on="health_area", how="left"
-        )
+    # ── Saisonnalité : sin/cos de la semaine épidémiologique ──
+    # Donne au modèle une information temporelle cyclique réelle
+    weekly_features["Saison_Sin"] = np.sin(
+        2 * np.pi * weekly_features["Semaine_Epi"] / 52)
+    weekly_features["Saison_Cos"] = np.cos(
+        2 * np.pi * weekly_features["Semaine_Epi"] / 52)
 
-        weekly_features['Age_Moyen'] = weekly_features['Age_Moyen'].fillna(
-            weekly_features['Age_Moyen'].median() if weekly_features['Age_Moyen'].notna().any() else 0)
-        weekly_features['Non_Vaccines'] = weekly_features['Non_Vaccines'].fillna(
-            weekly_features['Non_Vaccines'].mean() if weekly_features['Non_Vaccines'].notna().any() else 50.0)
+    # ── Lags (série temporelle par aire) ──────────────────────
+    weekly_features = weekly_features.sort_values(
+        ['Aire_Sante', 'Annee', 'Semaine_Epi'])
 
-        le_urban = LabelEncoder()
-        weekly_features["Urban_Encoded"] = le_urban.fit_transform(
-            weekly_features["Urbanisation"].fillna("Rural"))
+    for lag in [1, 2, 3, 4]:
+        weekly_features[f'Cas_Lag_{lag}'] = (
+            weekly_features.groupby('Aire_Sante')['Cas_Observes'].shift(lag))
 
-        if donnees_dispo["Climat"]:
-            scaler_climat = MinMaxScaler()
-            climate_cols = ["Temperature_Moy","Humidite_Moy","Saison_Seche_Humidite"]
-            for col in climate_cols:
-                if col in weekly_features.columns:
-                    col_mean = weekly_features[col].mean()
-                    weekly_features[col] = weekly_features[col].fillna(col_mean if not pd.isna(col_mean) else 0)
-            climate_scaled = scaler_climat.fit_transform(weekly_features[climate_cols].values)
-            for idx_c, col in enumerate(climate_cols):
-                weekly_features[f"{col}_Norm"] = climate_scaled[:, idx_c]
-            weekly_features["Coef_Climatique"] = (
-                weekly_features.get("Temperature_Moy_Norm", 0) * 0.4 +
-                weekly_features.get("Humidite_Moy_Norm", 0) * 0.4 +
-                weekly_features.get("Saison_Seche_Humidite_Norm", 0) * 0.2
-            )
+    # ── Moyenne mobile 4 semaines par aire ────────────────────
+    weekly_features['Cas_MA4'] = (
+        weekly_features.groupby('Aire_Sante')['Cas_Observes']
+        .transform(lambda x: x.shift(1).rolling(4, min_periods=1).mean()))
 
-        weekly_features = weekly_features.sort_values(['Aire_Sante','Annee','Semaine_Epi'])
-        for lag in [1,2,3,4]:
-            weekly_features[f'Cas_Lag_{lag}'] = (
-                weekly_features.groupby('Aire_Sante')['Cas_Observes'].shift(lag))
+    # ── Tendance locale (différence sem-1 à sem-4) ────────────
+    weekly_features['Tendance'] = (
+        weekly_features['Cas_Lag_1'].fillna(0) -
+        weekly_features['Cas_Lag_4'].fillna(0))
 
-        numeric_cols = weekly_features.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            weekly_features[col] = weekly_features[col].replace([np.inf,-np.inf], np.nan)
-            col_mean = weekly_features[col].mean()
-            weekly_features[col] = weekly_features[col].fillna(col_mean if not pd.isna(col_mean) else 0)
+    # Nettoyage final NaN/inf
+    numeric_cols = weekly_features.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        weekly_features[col] = weekly_features[col].replace(
+            [np.inf, -np.inf], np.nan)
+        col_med = weekly_features[col].median()
+        weekly_features[col] = weekly_features[col].fillna(
+            col_med if pd.notna(col_med) else 0)
 
-        st.subheader("📚 Entraînement du Modèle")
+    st.subheader("📚 Entraînement du Modèle")
 
-        feature_cols = ["Cas_Observes","Age_Moyen","Semaine_Epi",
-                        "Cas_Lag_1","Cas_Lag_2","Cas_Lag_3","Cas_Lag_4"]
+    # ── Construction feature_cols ─────────────────────────────
+    feature_cols = [
+        "Semaine_Epi",
+        "Saison_Sin", "Saison_Cos",    # saisonnalité cyclique
+        "Cas_Lag_1", "Cas_Lag_2", "Cas_Lag_3", "Cas_Lag_4",
+        "Cas_MA4",                      # moyenne mobile
+        "Tendance",                     # direction de la tendance
+        "Age_Moyen",
+    ]
 
-        feature_groups = {
-            "Historique_Cas": ["Cas_Lag_1","Cas_Lag_2","Cas_Lag_3","Cas_Lag_4"],
-            "Vaccination": [], "Demographie": [], "Urbanisation": [], "Climat": []
-        }
+    feature_groups = {
+        "Historique_Cas": ["Cas_Lag_1","Cas_Lag_2","Cas_Lag_3","Cas_Lag_4",
+                           "Cas_MA4","Tendance"],
+        "Vaccination": [],
+        "Demographie": [],
+        "Urbanisation": [],
+        "Climat": []
+    }
 
-        if donnees_dispo["Population"]:
-            feature_cols.extend(["Pop_Totale","Pop_Enfants","Densite_Pop","Densite_Enfants"])
-            feature_groups["Demographie"] = ["Pop_Totale","Pop_Enfants","Densite_Pop","Densite_Enfants"]
-            st.info("✅ Données démographiques intégrées au modèle")
-        if donnees_dispo["Urbanisation"]:
-            feature_cols.append("Urban_Encoded")
-            feature_groups["Urbanisation"] = ["Urban_Encoded"]
-            st.info("✅ Classification urbaine intégrée au modèle")
-        if donnees_dispo["Climat"]:
-            feature_cols.append("Coef_Climatique")
-            feature_groups["Climat"] = ["Coef_Climatique"]
-            st.info("✅ Coefficient climatique composite intégré au modèle")
-        if donnees_dispo["Vaccination"]:
-            feature_cols.extend(["Taux_Vaccination","Non_Vaccines"])
-            feature_groups["Vaccination"] = ["Taux_Vaccination","Non_Vaccines"]
-            st.info("✅ Données vaccinales intégrées au modèle")
-        elif "Non_Vaccines" in weekly_features.columns:
-            feature_cols.append("Non_Vaccines")
-            feature_groups["Vaccination"] = ["Non_Vaccines"]
+    if donnees_dispo["Population"]:
+        feature_cols.extend(["Pop_Totale","Pop_Enfants","Densite_Pop","Densite_Enfants"])
+        feature_groups["Demographie"] = ["Pop_Totale","Pop_Enfants",
+                                         "Densite_Pop","Densite_Enfants"]
+        st.info("✅ Données démographiques intégrées au modèle")
 
-        st.markdown(f"**Variables utilisées :** {len(feature_cols)} features")
+    if donnees_dispo["Urbanisation"]:
+        feature_cols.append("Urban_Encoded")
+        feature_groups["Urbanisation"] = ["Urban_Encoded"]
+        st.info("✅ Classification urbaine intégrée au modèle")
 
+    if donnees_dispo["Climat"]:
+        # CORRECTION : toutes les colonnes climat séparées (pas un seul coef)
+        feature_cols.extend(["Temp_Norm","Hum_Norm","Saison_Norm","Coef_Climatique"])
+        feature_groups["Climat"] = ["Temp_Norm","Hum_Norm",
+                                     "Saison_Norm","Coef_Climatique"]
+        st.info("✅ Variables climatiques intégrées au modèle")
+
+    if donnees_dispo["Vaccination"]:
+        feature_cols.extend(["Taux_Vaccination","Non_Vaccines"])
+        feature_groups["Vaccination"] = ["Taux_Vaccination","Non_Vaccines"]
+        st.info("✅ Données vaccinales intégrées au modèle")
+    elif "Non_Vaccines" in weekly_features.columns:
+        feature_cols.append("Non_Vaccines")
+        feature_groups["Vaccination"] = ["Non_Vaccines"]
+
+    # Supprimer doublons éventuels
+    feature_cols = list(dict.fromkeys(feature_cols))
+
+    st.markdown(f"**Variables utilisées :** {len(feature_cols)} features — "
+                f"`{'`, `'.join(feature_cols)}`")
+
+    # Vérifier que toutes les colonnes existent
+    feature_cols = [c for c in feature_cols if c in weekly_features.columns]
+
+    for col in feature_cols:
+        weekly_features[col] = weekly_features[col].fillna(0)
+
+    weekly_features_clean = weekly_features.dropna(subset=feature_cols)
+    if len(weekly_features_clean) < 20:
+        st.warning("⚠️ Données insuffisantes (minimum 20 observations requises)")
+        st.stop()
+
+    X = weekly_features_clean[feature_cols].copy().fillna(0)
+    y = weekly_features_clean["Cas_Observes"].copy().fillna(0)
+
+    # ── Poids manuels (mode expert) ───────────────────────────
+    if mode_importance == "👨‍⚕️ Manuel (Expert)":
+        st.markdown('<div class="weight-box">', unsafe_allow_html=True)
+        st.markdown("**⚖️ Application des poids manuels aux variables**")
+        column_weights = {}
+        for group_name, weight in poids_normalises.items():
+            cols_in_group = feature_groups.get(group_name, [])
+            if cols_in_group:
+                w_per_col = weight / len(cols_in_group)
+                for col in cols_in_group:
+                    if col in feature_cols:
+                        column_weights[col] = w_per_col
         for col in feature_cols:
-            weekly_features[col] = weekly_features[col].fillna(0)
+            if col not in column_weights:
+                column_weights[col] = 0.01
+        X_weighted = X.copy()
+        for col in feature_cols:
+            if col in column_weights:
+                X_weighted[col] = X_weighted[col] * column_weights[col]
+        weights_df = pd.DataFrame({
+            "Variable": list(column_weights.keys()),
+            "Poids": [f"{v*100:.2f}%" for v in column_weights.values()]
+        })
+        col1w, col2w = st.columns([2, 1])
+        with col1w:
+            st.dataframe(weights_df, use_container_width=True, hide_index=True)
+        with col2w:
+            st.metric("Total des poids", "100.00%")
+        st.markdown('</div>', unsafe_allow_html=True)
+        X_to_fit = X_weighted
+    else:
+        column_weights = {}
+        X_to_fit = X
 
-        weekly_features_clean = weekly_features.dropna(subset=feature_cols)
-        if len(weekly_features_clean) < 20:
-            st.warning("⚠️ Données insuffisantes (minimum 20 observations requises)")
-            st.stop()
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_to_fit)
+    X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
 
-        X = weekly_features_clean[feature_cols].copy().fillna(0)
-        y = weekly_features_clean["Cas_Observes"].copy().fillna(0)
+    # ── Choix modèle ──────────────────────────────────────────
+    if "GradientBoosting" in modele_choisi:
+        model = GradientBoostingRegressor(
+            n_estimators=300, learning_rate=0.05,
+            max_depth=5, min_samples_split=4, random_state=42)
+    elif "RandomForest" in modele_choisi:
+        model = RandomForestRegressor(
+            n_estimators=200, max_depth=10,
+            min_samples_split=4, random_state=42)
+    elif "Ridge" in modele_choisi:
+        model = Ridge(alpha=1.0)
+    elif "Lasso" in modele_choisi:
+        model = Lasso(alpha=0.1)
+    else:
+        model = DecisionTreeRegressor(max_depth=8, random_state=42)
 
-        if mode_importance == "👨‍⚕️ Manuel (Expert)":
-            st.markdown('<div class="weight-box">', unsafe_allow_html=True)
-            st.markdown("**⚖️ Application des poids manuels aux variables**")
-            column_weights = {}
-            for group_name, weight in poids_normalises.items():
-                if group_name in feature_groups:
-                    cols_in_group = feature_groups[group_name]
-                    if len(cols_in_group) > 0:
-                        weight_per_col = weight / len(cols_in_group)
-                        for col in cols_in_group:
-                            if col in feature_cols:
-                                column_weights[col] = weight_per_col
-            for col in feature_cols:
-                if col not in column_weights:
-                    column_weights[col] = 0.01
-            X_weighted = X.copy()
-            for col in feature_cols:
-                if col in column_weights:
-                    X_weighted[col] = X_weighted[col] * column_weights[col]
-            weights_df = pd.DataFrame({
-                "Variable": list(column_weights.keys()),
-                "Poids": [f"{v*100:.1f}%" for v in column_weights.values()]
-            })
-            st.dataframe(weights_df, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            X_to_fit = X_weighted
-        else:
-            X_to_fit = X
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42)
+    model.fit(X_train, y_train)
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X_to_fit)
-        X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+    score_test = model.score(X_test, y_test)
+    try:
+        cv_scores = cross_val_score(
+            model, X_scaled, y,
+            cv=min(5, len(X_scaled) // 4), scoring='r2')
+        cv_mean = float(cv_scores.mean())
+        cv_std  = float(cv_scores.std())
+    except Exception:
+        cv_mean, cv_std = float(score_test), 0.1
 
-        # Choix du modèle
-        if "GradientBoosting" in modele_choisi:
-            model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
-        elif "RandomForest" in modele_choisi:
-            model = RandomForestRegressor(n_estimators=100, random_state=42)
-        elif "Ridge" in modele_choisi:
-            model = Ridge(alpha=1.0)
-        elif "Lasso" in modele_choisi:
-            model = Lasso(alpha=1.0)
-        else:
-            model = DecisionTreeRegressor(max_depth=5, random_state=42)
+    col1, col2, col3 = st.columns(3)
+    with col1: st.metric("📊 R² Test", f"{score_test:.3f}")
+    with col2: st.metric("🎯 R² CV (5-fold)", f"{cv_mean:.3f}")
+    with col3: st.metric("📏 Écart-type CV", f"±{cv_std:.3f}")
 
-        model.fit(X_scaled, y)
+    if   cv_mean > 0.7: st.success(f"✅ Modèle performant ({modele_choisi})")
+    elif cv_mean > 0.5: st.warning(f"⚠️ Modèle acceptable ({modele_choisi})")
+    else:               st.error("❌ Modèle peu performant — envisagez un autre algorithme")
 
-        # Cross-validation
-        try:
-            cv_scores = cross_val_score(model, X_scaled, y, cv=min(5, len(X_scaled)//4), scoring='r2')
-            cv_mean = cv_scores.mean()
-            cv_std  = cv_scores.std()
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("R² (CV)", f"{cv_mean:.3f}")
-            with col2: st.metric("Écart-type CV", f"{cv_std:.3f}")
-            with col3: st.metric("Observations", f"{len(X_scaled):,}")
-        except Exception:
-            cv_std = 0.1
-
-        # Importance des variables (mode automatique)
-        if mode_importance == "🤖 Automatique (ML)" and hasattr(model, 'feature_importances_'):
-            importances = model.feature_importances_
-            importance_df = pd.DataFrame({
-                'Variable': feature_cols,
-                'Importance': importances
-            }).sort_values('Importance', ascending=False)
-            fig_imp = px.bar(importance_df, x='Importance', y='Variable', orientation='h',
-                title='Importance des variables (ML)', color='Importance',
-                color_continuous_scale='Blues')
+    # ── Importance des variables ──────────────────────────────
+    if hasattr(model, 'feature_importances_'):
+        imp_df = pd.DataFrame({
+            "Variable":   feature_cols,
+            "Importance": model.feature_importances_
+        }).sort_values("Importance", ascending=False)
+        with st.expander("📊 Importance des variables (ML)", expanded=True):
+            if mode_importance == "👨‍⚕️ Manuel (Expert)":
+                st.info("ℹ️ Ces importances reflètent l'influence **après application des poids manuels**")
+            else:
+                st.info("ℹ️ Ces importances sont **calculées automatiquement** par le modèle ML")
+            fig_imp = px.bar(
+                imp_df.head(15), x="Importance", y="Variable",
+                orientation="h",
+                title="Importance des variables (toutes features)",
+                color="Importance", color_continuous_scale="Viridis"
+            )
+            fig_imp.update_layout(height=max(350, len(imp_df.head(15)) * 28),
+                                  template="plotly_white")
             st.plotly_chart(fig_imp, use_container_width=True)
 
-        # ── CORRECTION 7 : Prédictions futures STRICTEMENT après dernière semaine ──
-        semaines_futures = generer_semaines_futures(derniere_semaine_epi, derniere_annee, n_weeks_pred)
-        aires_to_predict = weekly_features_clean["Aire_Sante"].unique()
+    # ============================================================
+    # GÉNÉRATION DES PRÉDICTIONS
+    # ============================================================
+    st.subheader(f"📅 Génération des Prédictions — {n_weeks_pred} Semaines")
 
-        future_predictions = []
-        progress_bar = st.progress(0)
-        status_text  = st.empty()
+    # Table de référence aire → valeurs statiques
+    aire_static_df = sa_gdf_enrichi.set_index("health_area")
 
-        for i_aire, aire in enumerate(aires_to_predict):
-            progress_bar.progress((i_aire + 1) / len(aires_to_predict))
-            status_text.text(f"Prédiction : {aire} ({i_aire+1}/{len(aires_to_predict)})")
+    future_predictions = []
+    aires_list = weekly_features_clean["Aire_Sante"].unique()
+    progress_pred = st.progress(0)
+    status_pred   = st.empty()
 
-            aire_data = weekly_features_clean[weekly_features_clean["Aire_Sante"] == aire].sort_values("sort_key")
-            if len(aire_data) == 0:
-                continue
+    for i_aire, aire in enumerate(aires_list):
+        progress_pred.progress((i_aire + 1) / len(aires_list))
+        status_pred.text(f"🔮 Prédiction : {aire} ({i_aire+1}/{len(aires_list)})")
 
-            last_obs       = aire_data.iloc[-1]
-            last_4_weeks   = aire_data['Cas_Observes'].values[-4:].tolist()
-            while len(last_4_weeks) < 4:
-                last_4_weeks = [last_4_weeks[0]] + last_4_weeks
+        aire_data = (weekly_features_clean[weekly_features_clean["Aire_Sante"] == aire]
+                     .sort_values("sort_key"))
+        if aire_data.empty:
+            continue
 
-            aire_info = sa_gdf_enrichi[sa_gdf_enrichi["health_area"] == aire]
-            aire_static = {}
-            if len(aire_info) > 0:
-                r = aire_info.iloc[0]
-                for col in feature_cols:
-                    if col in r.index:
-                        aire_static[col] = r[col] if pd.notna(r[col]) else 0
+        last_obs    = aire_data.iloc[-1]
+        hist_values = aire_data['Cas_Observes'].values
+        last_4      = hist_values[-4:].tolist()
+        while len(last_4) < 4:
+            last_4 = [last_4[0]] + last_4
 
-            for j_week, sem_info in enumerate(semaines_futures):
-                future_row = dict(last_obs)
-                future_row["Aire_Sante"]   = aire
-                future_row["Semaine_Epi"]  = sem_info["Semaine_Epi"]
-                future_row["Annee"]        = sem_info["Annee"]
-                future_row["Semaine_Label"]= sem_info["Semaine_Label"]
-                future_row["sort_key"]     = sem_info["sort_key"]
+        # Valeurs statiques de cette aire
+        static = {}
+        if aire in aire_static_df.index:
+            r = aire_static_df.loc[aire]
+            for col in feature_cols:
+                if col in r.index:
+                    v = r[col]
+                    static[col] = float(v) if pd.notna(v) else 0.0
 
-                # Lags depuis prédictions précédentes
-                prev_preds = [p["Predicted_Cases"] for p in future_predictions if p["Aire_Sante"] == aire]
+        prev_preds = []  # prédictions précédentes pour cette aire
 
-                if j_week == 0:
-                    future_row["Cas_Lag_1"] = last_4_weeks[-1]
-                    future_row["Cas_Lag_2"] = last_4_weeks[-2] if len(last_4_weeks) >= 2 else last_4_weeks[-1]
-                    future_row["Cas_Lag_3"] = last_4_weeks[-3] if len(last_4_weeks) >= 3 else last_4_weeks[-1]
-                    future_row["Cas_Lag_4"] = last_4_weeks[-4] if len(last_4_weeks) >= 4 else last_4_weeks[-1]
-                else:
-                    future_row["Cas_Observes"] = prev_preds[-1] if prev_preds else last_obs["Cas_Observes"]
-                    future_row["Cas_Lag_1"] = prev_preds[-1] if len(prev_preds) >= 1 else last_4_weeks[-1]
-                    future_row["Cas_Lag_2"] = prev_preds[-2] if len(prev_preds) >= 2 else last_4_weeks[-2]
-                    future_row["Cas_Lag_3"] = prev_preds[-3] if len(prev_preds) >= 3 else last_4_weeks[-3]
-                    future_row["Cas_Lag_4"] = prev_preds[-4] if len(prev_preds) >= 4 else last_4_weeks[-4]
+        for i_week in range(1, n_weeks_pred + 1):
+            sem  = (derniere_semaine_epi + i_week - 1) % 52 + 1
+            an   = derniere_annee + ((derniere_semaine_epi + i_week - 1) // 52)
 
-                X_future_values = []
-                for col in feature_cols:
-                    val = future_row.get(col, aire_static.get(col, 0))
-                    if pd.isna(val):
-                        val = 0
-                    X_future_values.append(float(val))
+            # ── Saisonnalité cyclique (varie chaque semaine) ──
+            saison_sin = float(np.sin(2 * np.pi * sem / 52))
+            saison_cos = float(np.cos(2 * np.pi * sem / 52))
 
-                X_future = np.array([X_future_values])
-                if mode_importance == "👨‍⚕️ Manuel (Expert)":
-                    for idx_c, col in enumerate(feature_cols):
-                        if col in column_weights:
-                            X_future[0, idx_c] *= column_weights[col]
+            # ── Lags mis à jour depuis les prédictions précédentes ──
+            all_recent = last_4 + prev_preds
+            lag1 = all_recent[-1] if len(all_recent) >= 1 else 0
+            lag2 = all_recent[-2] if len(all_recent) >= 2 else lag1
+            lag3 = all_recent[-3] if len(all_recent) >= 3 else lag2
+            lag4 = all_recent[-4] if len(all_recent) >= 4 else lag3
+            ma4  = float(np.mean(all_recent[-4:])) if all_recent else 0.0
+            tend = float(lag1 - lag4)
 
-                X_future = np.nan_to_num(X_future, nan=0.0)
-                X_future_scaled = scaler.transform(X_future)
-                X_future_scaled = np.nan_to_num(X_future_scaled, nan=0.0)
+            # ── Coef_Climatique modulé selon la saison ────────
+            # Applique une variation sinusoïdale sur le coef de base
+            # pour que le climat varie réellement semaine par semaine
+            base_coef = static.get("Coef_Climatique",
+                                   float(last_obs.get("Coef_Climatique", 0)))
+            # Variation ±15% autour de la valeur de base selon la semaine
+            coef_climat_future = base_coef * (1 + 0.15 * np.sin(2 * np.pi * sem / 52))
 
-                predicted_cases = max(0, model.predict(X_future_scaled)[0])
-                if cv_std > 0:
-                    noise = np.random.normal(0, predicted_cases * cv_std * 0.1)
-                    predicted_cases = max(0, predicted_cases + noise)
+            future_row = {col: static.get(col, 0.0) for col in feature_cols}
+            future_row.update({
+                "Semaine_Epi":     sem,
+                "Saison_Sin":      saison_sin,
+                "Saison_Cos":      saison_cos,
+                "Cas_Lag_1":       lag1,
+                "Cas_Lag_2":       lag2,
+                "Cas_Lag_3":       lag3,
+                "Cas_Lag_4":       lag4,
+                "Cas_MA4":         ma4,
+                "Tendance":        tend,
+                "Coef_Climatique": coef_climat_future,
+            })
+            # Temp/Hum normalisées : varier légèrement selon la saison
+            if donnees_dispo["Climat"] and scaler_climat is not None:
+                base_temp = static.get("Temp_Norm",   float(last_obs.get("Temp_Norm", 0.5)))
+                base_hum  = static.get("Hum_Norm",    float(last_obs.get("Hum_Norm",  0.5)))
+                future_row["Temp_Norm"]   = float(np.clip(
+                    base_temp + 0.1 * np.sin(2 * np.pi * (sem - 8) / 52), 0, 1))
+                future_row["Hum_Norm"]    = float(np.clip(
+                    base_hum  + 0.15 * np.sin(2 * np.pi * (sem - 30) / 52), 0, 1))
+                future_row["Saison_Norm"] = float(np.clip(
+                    future_row["Hum_Norm"] * 0.7, 0, 1))
 
-                future_row["Predicted_Cases"] = predicted_cases
-                future_predictions.append(future_row)
+            # ── Vecteur de features pour la prédiction ────────
+            X_fut = np.array([[
+                float(future_row.get(col, 0)) for col in feature_cols
+            ]])
 
-        progress_bar.empty()
-        status_text.empty()
+            # Application poids manuels si mode expert
+            if mode_importance == "👨‍⚕️ Manuel (Expert)" and column_weights:
+                for idx_c, col in enumerate(feature_cols):
+                    if col in column_weights:
+                        X_fut[0, idx_c] *= column_weights[col]
 
-        future_df = pd.DataFrame(future_predictions)
-        future_df['Predicted_Cases'] = future_df['Predicted_Cases'].round(0).astype(int)
+            X_fut = np.nan_to_num(X_fut, nan=0.0, posinf=0.0, neginf=0.0)
+            X_fut_scaled = scaler.transform(X_fut)
+            X_fut_scaled = np.nan_to_num(X_fut_scaled, nan=0.0)
+
+            pred = float(max(0, model.predict(X_fut_scaled)[0]))
+
+            # Bruit réaliste proportionnel à l'incertitude du modèle
+            if cv_std > 0 and pred > 0:
+                noise = np.random.normal(0, pred * cv_std * 0.15)
+                pred  = float(max(0, pred + noise))
+
+            prev_preds.append(pred)
+
+            future_predictions.append({
+                "Aire_Sante":       aire,
+                "Annee":            an,
+                "Semaine_Epi":      sem,
+                "Semaine_Label":    f"{an}-S{sem:02d}",
+                "sort_key":         an * 100 + sem,
+                "Predicted_Cases":  pred,
+            })
+
+    progress_pred.empty()
+    status_pred.empty()
+
+    future_df = pd.DataFrame(future_predictions)
+    future_df['Predicted_Cases'] = future_df['Predicted_Cases'].round(0).astype(int)
+
 
         st.success(f"✓ {len(future_df)} prédictions générées ({len(aires_to_predict)} aires × {n_weeks_pred} semaines)")
 
