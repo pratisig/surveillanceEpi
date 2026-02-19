@@ -956,7 +956,7 @@ with tab1:
             if len(vacc_valides) > 0:
                 taux_non_vac = (vacc_valides['Statut_Vaccinal'] == 'Non').mean() * 100
                 delta_vac = taux_non_vac - 45
-                st.metric("Non vaccin és", f"{taux_non_vac:.1f}%", delta=f"{delta_vac:.1f}%")
+                st.metric("Non vaccinés", f"{taux_non_vac:.1f}%", delta=f"{delta_vac:.1f}%")
             else:
                 st.metric("Non vaccinés", "N/A")
         else:
@@ -1032,10 +1032,10 @@ with tab1:
     ).fillna(0)
 
     # 2 sous-onglets
-    tab_taux, tab_cas = st.tabs(["📈 Par Taux d'Attaque", "🔢 Par Nombre de Cas"])
+    tab_taux, tab_cas = st.tabs(["📈 Par Taux d\'Attaque", "🔢 Par Nombre de Cas"])
 
     with tab_taux:
-        st.markdown("**Top 10 - Taux d'attaque le plus élevé (pour 10 000 habitants)**")
+        st.markdown("**Top 10 - Taux d\'attaque le plus élevé (pour 10 000 habitants)**")
 
         top10_taux = cases_by_area.nlargest(10, 'Taux_Attaque_10K')
 
@@ -1044,7 +1044,7 @@ with tab1:
             x='Taux_Attaque_10K',
             y='Aire_Sante',
             orientation='h',
-            title="Top 10 - Taux d'attaque",
+            title="Top 10 - Taux d\'attaque",
             labels={'Taux_Attaque_10K': 'Taux pour 10K hab.', 'Aire_Sante': 'Aire de santé'},
             color='Taux_Attaque_10K',
             color_continuous_scale='Reds',
@@ -1152,17 +1152,18 @@ with tab1:
         age_dist = df['Groupe_Age'].value_counts().reset_index()
         age_dist.columns = ['Groupe', 'Cas']
 
+        # CORRECTION ICI : Utiliser des guillemets doubles
         fig_age = px.bar(
             age_dist,
             x='Groupe',
             y='Cas',
-            title='Distribution par groupe d'âge',
+            title="Distribution par groupe d\'âge",
             color='Cas',
             color_continuous_scale='Blues'
         )
         st.plotly_chart(fig_age, use_container_width=True)
     else:
-        st.info("ℹ️ Données d'âge non disponibles")
+        st.info("ℹ️ Données d\'âge non disponibles")
 
 # ============================================================
 # ONGLET 2 : CARTOGRAPHIE
@@ -1215,6 +1216,7 @@ with tab2:
     st_folium(m, width=900, height=600)
 
     st.info(f"📍 {len(sa_gdf_with_cases[sa_gdf_with_cases['Cas_Observes'] > 0])} aires avec cas signalés")
+
 # ============================================================
 # ONGLET 3 : MODÉLISATION ET PRÉDICTION
 # ============================================================
