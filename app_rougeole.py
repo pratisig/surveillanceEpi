@@ -1703,10 +1703,10 @@ with tab3:
         st.stop()
 
     # ── Préparation des features par aire et semaine ───────────
-    weekly_features = df.groupby(["AireSante", "Annee", "SemaineEpi"]).agg(
-        CasObserves=("IDCas", "count"),
-        NonVaccines=("StatutVaccinal", lambda x: (x == "Non").mean() * 100),
-        AgeMoyen=("AgeMois", "mean")
+    weekly_features = df.groupby(["Aire_Sante", "Annee", "Semaine_Epi"]).agg(
+        CasObserves=("ID_Cas", "count"),
+        NonVaccines=("Statut_Vaccinal", lambda x: (x == "Non").mean() * 100),
+        AgeMoyen=("Age_Mois", "mean")
     ).reset_index()
 
     weekly_features["sort_key"] = weekly_features["Annee"] * 100 + weekly_features["SemaineEpi"]
@@ -1714,15 +1714,15 @@ with tab3:
         weekly_features["Annee"].astype(str) + "-S" +
         weekly_features["SemaineEpi"].astype(str).str.zfill(2)
     )
-    weekly_features = weekly_features.sort_values(["AireSante", "sort_key"]).reset_index(drop=True)
+    weekly_features = weekly_features.sort_values(["Aire_Sante", "sort_key"]).reset_index(drop=True)
 
     # Lags par aire
-    weekly_features = weekly_features.sort_values(["AireSante", "sort_key"])
+    weekly_features = weekly_features.sort_values(["Aire_Sante", "sort_key"])
     for lag in [1, 2, 3, 4]:
-        weekly_features[f"Lag{lag}"] = weekly_features.groupby("AireSante")["CasObserves"].shift(lag)
-    weekly_features["RollingMean4"] = weekly_features.groupby("AireSante")["CasObserves"] \
+        weekly_features[f"Lag{lag}"] = weekly_features.groupby("Aire_Sante")["CasObserves"].shift(lag)
+    weekly_features["RollingMean4"] = weekly_features.groupby("Aire_Sante")["CasObserves"] \
         .transform(lambda x: x.shift(1).rolling(4, min_periods=1).mean())
-    weekly_features["RollingStd4"] = weekly_features.groupby("AireSante")["CasObserves"] \
+    weekly_features["RollingStd4"] = weekly_features.groupby("Aire_Sante")["CasObserves"] \
         .transform(lambda x: x.shift(1).rolling(4, min_periods=1).std().fillna(0))
     weekly_features["SemaineSin"] = np.sin(2 * np.pi * weekly_features["SemaineEpi"] / 52)
     weekly_features["SemaineCos"] = np.cos(2 * np.pi * weekly_features["SemaineEpi"] / 52)
@@ -1734,7 +1734,7 @@ with tab3:
     cols_merge_dispo = [c for c in cols_merge if c in sa_gdf_enrichi.columns]
     weekly_features = weekly_features.merge(
         sa_gdf_enrichi[cols_merge_dispo],
-        left_on="AireSante", right_on="health_area", how="left"
+        left_on="Aire_Sante", right_on="health_area", how="left"
     )
 
     # Encodage urbanisation
@@ -1841,8 +1841,8 @@ with tab3:
     futures_info = generer_semaines_futures(derniere_semaine_epi, derniere_annee, n_weeks_pred)
     futures_rows = []
 
-    for aire in df_model["AireSante"].unique():
-        aire_hist = weekly_features[weekly_features["AireSante"] == aire].copy()
+    for aire in df_model["Aire_Sante"].unique():
+        aire_hist = weekly_features[weekly_features["Aire_Sante"] == aire].copy()
         aire_hist = aire_hist.sort_values("sort_key")
         aire_meta = sa_gdf_enrichi[sa_gdf_enrichi["health_area"] == aire]
 
@@ -1897,7 +1897,7 @@ with tab3:
 
             cas_pred = float(max(0, model.predict(X_fut)[0]))
             futures_rows.append({
-                "AireSante": aire, "SemaineLabel": lbl,
+                "Aire_Sante": aire, "SemaineLabel": lbl,
                 "SemaineEpi": sem, "Annee": an,
                 "sort_key": fw["sort_key"], "CasPredits": round(cas_pred, 1)
             })
@@ -1908,7 +1908,7 @@ with tab3:
 
     # ── Courbe épidémique avec prédictions ─────────────────────
     st.subheader("📈 Courbe Épidémique avec Prédictions")
-    weekly_obs = weekly_cases[["SemaineLabel", "Cas", "sort_key"]].copy()
+    weekly_obs = weekly_cases[["Semaine_Label", "Cas", "sort_key"]].copy()
     weekly_obs.columns = ["SemaineLabel", "Valeur", "sort_key"]
     weekly_obs["Type"] = "Observé"
 
@@ -1923,7 +1923,7 @@ with tab3:
                        color_discrete_map={"Observé": "#d32f2f", "Prédit": "#1976d2"},
                        title=f"Courbe épidémique observée + prédictions ({n_weeks_pred} semaines)",
                        markers=True)
-    fig_pred.add_vline(x=weekly_cases.iloc[-1]["SemaineLabel"], line_dash="dash",
+    fig_pred.add_vline(x=weekly_cases.iloc[-1]["Semaine_Label"], line_dash="dash",
                        line_color="gray", annotation_text="Fin données réelles",
                        annotation_position="top left")
     fig_pred.update_layout(xaxis=dict(tickangle=-45, nticks=25),
@@ -1933,11 +1933,11 @@ with tab3:
     # ── Synthèse des risques par aire ──────────────────────────
     st.subheader("🎯 Synthèse des Risques par Aire de Santé")
     risk_rows = []
-    for aire in future_df["AireSante"].unique():
-        aire_pred = future_df[future_df["AireSante"] == aire]
+    for aire in future_df["Aire_Sante"].unique():
+        aire_pred = future_df[future_df["Aire_Sante"] == aire]
         cas_pred_total = aire_pred["CasPredits"].sum()
         semaine_pic    = aire_pred.loc[aire_pred["CasPredits"].idxmax(), "SemaineLabel"]
-        aire_obs       = weekly_features[weekly_features["AireSante"] == aire]
+        aire_obs       = weekly_features[weekly_features["Aire_Sante"] == aire]
         cas_obs_m      = aire_obs["CasObserves"].mean() if len(aire_obs) > 0 else 0
         variation_pct  = (cas_pred_total / n_weeks_pred - cas_obs_m) / (cas_obs_m + 1) * 100
 
@@ -1951,7 +1951,7 @@ with tab3:
             cat = "Stable/baisse"
 
         risk_rows.append({
-            "AireSante": aire, "CasPreditsTotal": round(cas_pred_total, 1),
+            "Aire_Sante": aire, "CasPreditsTotal": round(cas_pred_total, 1),
             "VariationPct": round(variation_pct, 1),
             "CategorieVariation": cat, "SemainePic": semaine_pic
         })
@@ -1980,7 +1980,7 @@ with tab3:
         "Forte baisse":  "#2196f3"
     }
     fig_risk = px.bar(
-        risk_df.head(20), x="AireSante", y="CasPreditsTotal",
+        risk_df.head(20), x="Aire_Sante", y="CasPreditsTotal",
         color="CategorieVariation", color_discrete_map=color_map_cat,
         title="Top 20 aires — Cas prédits et catégorie de risque",
         text="CasPreditsTotal"
@@ -1999,7 +1999,7 @@ with tab3:
     # ── Heatmap prédictions ────────────────────────────────────
     st.subheader("🌡️ Heatmap des Prédictions par Aire et Semaine")
     heatmap_data = future_df.pivot_table(
-        index="AireSante", columns="SemaineLabel",
+        index="Aire_Sante", columns="SemaineLabel",
         values="CasPredits", aggfunc="sum"
     ).fillna(0)
 
@@ -2016,7 +2016,7 @@ with tab3:
     # ── Cartes géographiques prédictions ──────────────────────
     st.subheader("🗺️ Cartographie des Prédictions")
     gdf_predictions = sa_gdf_enrichi.merge(
-        risk_df, left_on="health_area", right_on="AireSante", how="left"
+        risk_df, left_on="health_area", right_on="Aire_Sante", how="left"
     )
     gdf_predictions["CasPreditsTotal"]    = gdf_predictions["CasPreditsTotal"].fillna(0)
     gdf_predictions["CategorieVariation"] = gdf_predictions["CategorieVariation"].fillna("Stable/baisse")
@@ -2101,7 +2101,7 @@ with tab3:
         st.error(f"🚨 {len(forte_hausse)} aires en **FORTE HAUSSE** (>{seuil_hausse}%)")
         with st.expander("📋 Détails des aires critiques", expanded=True):
             st.dataframe(
-                forte_hausse[["AireSante", "CasPreditsTotal", "VariationPct", "SemainePic"]]
+                forte_hausse[["Aire_Sante", "CasPreditsTotal", "VariationPct", "SemainePic"]]
                 .style.format({"CasPreditsTotal": "{:.0f}", "VariationPct": "{:.1f}"}),
                 use_container_width=True
             )
@@ -2118,7 +2118,7 @@ with tab3:
         st.success(f"📉 {len(forte_baisse)} aires en **FORTE BAISSE** (>{seuil_baisse}%)")
         with st.expander("📋 Aires en amélioration"):
             st.dataframe(
-                forte_baisse[["AireSante", "CasPreditsTotal", "VariationPct"]]
+                forte_baisse[["Aire_Sante", "CasPreditsTotal", "VariationPct"]]
                 .style.format({"CasPreditsTotal": "{:.0f}", "VariationPct": "{:.1f}"}),
                 use_container_width=True
             )
