@@ -1923,9 +1923,24 @@ with tab3:
                        color_discrete_map={"Observé": "#d32f2f", "Prédit": "#1976d2"},
                        title=f"Courbe épidémique observée + prédictions ({n_weeks_pred} semaines)",
                        markers=True)
-    fig_pred.add_vline(x=weekly_cases.iloc[-1]["Semaine_Label"], line_dash="dash",
-                       line_color="gray", annotation_text="Fin données réelles",
-                       annotation_position="top left")
+    derniere_label = weekly_cases.iloc[-1]["Semaine_Label"]
+    fig_pred.add_shape(
+        type="line",
+        x0=derniere_label, x1=derniere_label,
+        y0=0, y1=1,
+        xref="x", yref="paper",
+        line=dict(color="gray", width=2, dash="dash")
+    )
+    fig_pred.add_annotation(
+        x=derniere_label,
+        y=1.0,
+        xref="x", yref="paper",
+        text="Fin données réelles",
+        showarrow=False,
+        font=dict(color="gray", size=11),
+        xanchor="left",
+        yanchor="top"
+    )
     fig_pred.update_layout(xaxis=dict(tickangle=-45, nticks=25),
                            height=450, template="plotly_white", hovermode="x unified")
     st.plotly_chart(fig_pred, use_container_width=True)
