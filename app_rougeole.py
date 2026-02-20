@@ -1724,8 +1724,8 @@ with tab3:
         .transform(lambda x: x.shift(1).rolling(4, min_periods=1).mean())
     weekly_features["RollingStd4"] = weekly_features.groupby("Aire_Sante")["CasObserves"] \
         .transform(lambda x: x.shift(1).rolling(4, min_periods=1).std().fillna(0))
-    weekly_features["SemaineSin"] = np.sin(2 * np.pi * weekly_features["SemaineEpi"] / 52)
-    weekly_features["SemaineCos"] = np.cos(2 * np.pi * weekly_features["SemaineEpi"] / 52)
+    weekly_features["SemaineSin"] = np.sin(2 * np.pi * weekly_features["Semaine_Epi"] / 52)
+    weekly_features["SemaineCos"] = np.cos(2 * np.pi * weekly_features["Semaine_Epi"] / 52)
 
     # Merge variables externes par aire
     cols_merge = ["health_area", "PopTotale", "PopEnfants", "DensitePop",
