@@ -1709,10 +1709,10 @@ with tab3:
         AgeMoyen=("Age_Mois", "mean")
     ).reset_index()
 
-    weekly_features["sort_key"] = weekly_features["Annee"] * 100 + weekly_features["SemaineEpi"]
+    weekly_features["sort_key"] = weekly_features["Annee"] * 100 + weekly_features["Semaine_Epi"]
     weekly_features["SemaineLabel"] = (
         weekly_features["Annee"].astype(str) + "-S" +
-        weekly_features["SemaineEpi"].astype(str).str.zfill(2)
+        weekly_features["Semaine_Epi"].astype(str).str.zfill(2)
     )
     weekly_features = weekly_features.sort_values(["Aire_Sante", "sort_key"]).reset_index(drop=True)
 
