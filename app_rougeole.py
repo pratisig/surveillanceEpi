@@ -1508,6 +1508,7 @@ with tab1:
 with tab2:
     st.header("🗺️ Cartographie de la Situation Actuelle")
 
+    # ── Ces 3 fonctions DOIVENT être ici, dans tab2 ─────────────
     def safe_float(val):
         try:
             f = float(val)
@@ -1522,11 +1523,11 @@ with tab2:
         except (TypeError, ValueError):
             return default
 
-    def fmt_val(val, fmt=".1f", suffix="", fallback="N/A"):
+    def fmt_val(val, fmt="{:.1f}", suffix="", fallback="N/A"):
         f = safe_float(val)
         return fallback if np.isnan(f) else fmt.format(f) + suffix
 
-    # ── Centrage de la carte ───────────────────────────────────
+    # ── Centrage de la carte ────────────────────────────────────
     try:
         center_lat = float(sa_gdf_with_cases.geometry.centroid.y.mean())
         center_lon = float(sa_gdf_with_cases.geometry.centroid.x.mean())
@@ -1535,7 +1536,7 @@ with tab2:
     except Exception:
         center_lat, center_lon = 15.0, 2.0
 
-    # ── Construction de la carte folium ───────────────────────
+    # ── Construction de la carte folium ────────────────────────
     m = folium.Map(location=[center_lat, center_lon], zoom_start=6,
                    tiles="CartoDB positron", control_scale=True)
 
@@ -1550,22 +1551,22 @@ with tab2:
     )
     colormap.add_to(m)
 
-    # ── Ajout des polygones ────────────────────────────────────
+    # ── Ajout des polygones ─────────────────────────────────────
     for _, row in sa_gdf_with_cases.iterrows():
-        aire_name   = str(row.get("health_area", "N/A"))
-        cas_obs     = safe_int(row.get("Cas_Observes"), 0)
-        pop_enfants = safe_float(row.get("Pop_Enfants", np.nan))
-        pop_totale  = safe_float(row.get("Pop_Totale", np.nan))
+        aire_name    = str(row.get("health_area", "N/A"))
+        cas_obs      = safe_int(row.get("Cas_Observes"), 0)
+        pop_enfants  = safe_float(row.get("Pop_Enfants", np.nan))
+        pop_totale   = safe_float(row.get("Pop_Totale", np.nan))
         taux_attaque = safe_float(row.get("Taux_Attaque_10000", np.nan))
         urbanisation = str(row.get("Urbanisation", "N/A")) if pd.notna(row.get("Urbanisation")) else "N/A"
-        densite     = safe_float(row.get("Densite_Pop", np.nan))
-        taux_vacc   = safe_float(row.get("Taux_Vaccination", np.nan))
-        temp_moy    = safe_float(row.get("Temperature_Moy", np.nan))
-        hum_moy     = safe_float(row.get("Humidite_Moy", np.nan))
+        densite      = safe_float(row.get("Densite_Pop", np.nan))
+        taux_vacc    = safe_float(row.get("Taux_Vaccination", np.nan))
+        temp_moy     = safe_float(row.get("Temperature_Moy", np.nan))
+        hum_moy      = safe_float(row.get("Humidite_Moy", np.nan))
 
-        fill_color  = colormap(min(cas_obs, max_cases))
-        line_color  = "#b71c1c" if cas_obs >= seuil_alerte_epidemique else "#555555"
-        line_weight = 2.5 if cas_obs >= seuil_alerte_epidemique else 0.5
+        fill_color   = colormap(min(cas_obs, max_cases))
+        line_color   = "#b71c1c" if cas_obs >= seuil_alerte_epidemique else "#555555"
+        line_weight  = 2.5 if cas_obs >= seuil_alerte_epidemique else 0.5
         badge = "<span style='background:#d32f2f;color:white;padding:2px 8px;border-radius:10px;font-size:11px;'>⚠️ ALERTE</span>" if cas_obs >= seuil_alerte_epidemique else ""
 
         popup_html = f"""
@@ -1618,7 +1619,7 @@ with tab2:
         except Exception:
             continue
 
-    # ── HeatMap ────────────────────────────────────────────────
+    # ── HeatMap ─────────────────────────────────────────────────
     heat_data = [
         [float(r.geometry.centroid.y), float(r.geometry.centroid.x), float(r["Cas_Observes"])]
         for _, r in sa_gdf_with_cases.iterrows()
@@ -1629,7 +1630,7 @@ with tab2:
                 gradient={0.0: "blue", 0.4: "lime", 0.7: "yellow", 1.0: "red"}
         ).add_to(m)
 
-    # ── Légende personnalisée ──────────────────────────────────
+    # ── Légende personnalisée ────────────────────────────────────
     mc3 = max(max_cases / 3, 1)
     legend_html = f"""
     <div style="position:fixed;bottom:50px;left:50px;width:240px;background:white;
@@ -1644,8 +1645,21 @@ with tab2:
     </div>"""
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # ── Affichage de la carte ──────────────────────────────────
+    # ── Affichage de la carte ── CORRECTION CLÉ : returned_objects=[]
     st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
+
+    # ── Métriques synthèse ──────────────────────────────────────
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        nal = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
+        st.metric("⚠️ Aires en alerte", nal, f"{nal/len(sa_gdf)*100:.1f}%")
+    with col2:
+        nsc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
+        st.metric("✅ Aires sans cas", nsc, f"{nsc/len(sa_gdf)*100:.1f}%")
+    with col3:
+        d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
+        st.metric("👥 Densité moy.", fmt_val(d_moy, "{:.1f}", " hab/km²"))
+
 
     # ── Métriques synthèse ─────────────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -2012,21 +2026,59 @@ with tab3:
     )
 
     # ── Heatmap prédictions ────────────────────────────────────
-    st.subheader("🌡️ Heatmap des Prédictions par Aire et Semaine")
-    heatmap_data = future_df.pivot_table(
+    st.subheader("🌡️ Heatmap des Prédictions — Top 15 Aires les Plus à Risque")
+
+    # Sélection des 15 aires avec le plus de cas prédits totaux
+    top15_aires = (
+        future_df.groupby("Aire_Sante")["CasPredits"]
+        .sum()
+        .nlargest(15)
+        .index
+        .tolist()
+    )
+
+    heatmap_data = future_df[future_df["Aire_Sante"].isin(top15_aires)].pivot_table(
         index="Aire_Sante", columns="SemaineLabel",
         values="CasPredits", aggfunc="sum"
     ).fillna(0)
 
+    # Tri des colonnes en ordre chronologique
+    if len(heatmap_data.columns) > 0:
+        sort_map = future_df[["SemaineLabel", "sort_key"]].drop_duplicates().set_index("SemaineLabel")["sort_key"]
+        cols_sorted = sorted(heatmap_data.columns, key=lambda c: sort_map.get(c, 0))
+        heatmap_data = heatmap_data[cols_sorted]
+
     if len(heatmap_data) > 0:
-        fig_hm = px.imshow(
-            heatmap_data, color_continuous_scale="Reds",
-            title="Cas prédits par aire et semaine",
-            aspect="auto", height=max(400, len(heatmap_data) * 20)
+        h_heat = max(400, min(600, len(heatmap_data) * 35))
+        fig_hm = go.Figure(go.Heatmap(
+            z=heatmap_data.values,
+            x=list(heatmap_data.columns),
+            y=list(heatmap_data.index),
+            colorscale=[
+                [0.0,  "rgb(255,255,255)"],
+                [0.05, "rgb(255,245,220)"],
+                [0.25, "rgb(255,200,100)"],
+                [0.50, "rgb(255,140,40)"],
+                [0.75, "rgb(220,50,20)"],
+                [1.0,  "rgb(120,0,0)"],
+            ],
+            colorbar=dict(title="Cas prédits", thickness=15),
+            hovertemplate="<b>%{y}</b><br>Semaine %{x}<br>Cas prédits : %{z}<extra></extra>",
+        ))
+        fig_hm.update_layout(
+            title=f"Prédictions — Top 15 aires les plus à risque ({n_weeks_pred} semaines)",
+            xaxis_title="Semaine",
+            yaxis_title="Aire de Santé",
+            height=h_heat,
+            template="plotly_white",
+            xaxis=dict(tickangle=-60, tickfont=dict(size=9)),
+            yaxis=dict(tickfont=dict(size=10), autorange="reversed"),
+            margin=dict(l=160, r=80, t=60, b=120)
         )
-        fig_hm.update_layout(xaxis=dict(tickangle=-45),
-                              coloraxis_colorbar=dict(title="Cas prédits"))
         st.plotly_chart(fig_hm, use_container_width=True)
+        st.caption(f"ℹ️ Heatmap limitée aux {len(heatmap_data)} aires avec le plus grand nombre de cas prédits totaux.")
+    else:
+        st.info("ℹ️ Pas de données suffisantes pour la heatmap.")
 
     # ── Cartes géographiques prédictions ──────────────────────
     st.subheader("🗺️ Cartographie des Prédictions")
