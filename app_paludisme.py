@@ -925,24 +925,38 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
     )
 
     if source_geo == "📂 Fichier local (ao_hlthArea.zip)":
-        import os
-        local_path = "ao_hlthArea.zip"
-        if os.path.exists(local_path):
-            try:
-                gdf = gpd.read_file(f"zip://{local_path}")
-                gdf = ensure_wgs84(gdf)
-                if "health_area" not in gdf.columns:
-                    st.error("❌ Colonne 'health_area' absente dans ao_hlthArea.zip")
-                else:
-                    gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                    st.session_state.gdf_health = gdf
-                    st.success(f"✅ {len(gdf)} aires chargées (fichier local)")
-            except Exception as e:
-                st.error(f"❌ Erreur lecture fichier local : {str(e)}")
-        else:
-            st.warning("⚠️ Fichier 'ao_hlthArea.zip' introuvable sur le serveur.")
-            st.info("💡 Placez ao_hlthArea.zip à la racine du projet.")
-        health_file = None  # pas de uploader dans ce mode
+       import os, zipfile, tempfile
+       
+       local_path = os.path.join("data", "ao_hlthArea.zip")
+       
+       if not os.path.exists(local_path):
+           st.error(f"⚠️ Fichier non trouvé : {local_path}")
+           st.info("💡 Placez ao_hlthArea.zip dans le dossier 'data/'")
+       else:
+           try:
+               with tempfile.TemporaryDirectory() as tmpdir:
+                   with zipfile.ZipFile(local_path, "r") as z:
+                       z.extractall(tmpdir)
+                   shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                   if not shp_files:
+                       raise ValueError("Aucun fichier .shp trouvé dans le ZIP")
+                   shp_path = os.path.join(tmpdir, shp_files[0])
+                   gdf = gpd.read_file(shp_path)
+               
+               gdf = ensure_wgs84(gdf)
+               
+               if "health_area" not in gdf.columns:
+                   st.error("❌ Colonne 'health_area' absente dans ao_hlthArea.zip")
+               else:
+                   gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                   st.session_state.gdf_health = gdf
+                   st.success(f"✅ {len(gdf)} aires chargées (fichier local)")
+           
+           except Exception as e:
+               st.error(f"❌ Erreur lecture fichier local : {str(e)}")
+       
+       health_file = None  # pas de uploader dans ce mode
+
 
     else:  # Upload manuel
         health_file = st.file_uploader(
@@ -2782,6 +2796,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
