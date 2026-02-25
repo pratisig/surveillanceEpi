@@ -939,54 +939,42 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     st.error(f"❌ Fichier non trouvé : {zip_path}")
                     st.info("📁 Placez 'ao_hlthArea.zip' dans le dossier 'data/'")
                     st.stop()
-                try:
-                   with tempfile.TemporaryDirectory() as tmpdir:
-                       with zipfile.ZipFile(zip_path, "r") as z:
-                           z.extractall(tmpdir)
-                       shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                       if not shp_files:
-                           raise ValueError("Aucun fichier .shp trouvé dans le ZIP")
-                       gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
-                   gdf = ensure_wgs84(gdf)
-               
-                   # ── Mapping automatique de la colonne "aire de santé" ──
-                   # Normaliser les noms de colonnes
-                   gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in gdf.columns]
-                   
-                   # Candidats possibles (même logique que rougeole)
-                   candidates = [
-                       "health_area", "healtharea", "aire_sante", "airesante",
-                       "aire_de_sante", "health_zone", "healthzone", "zone_sante",
-                       "name", "nom", "aire", "area_name", "adm_name", "nomare"
-                   ]
-                   found_col = None
-                   for c in candidates:
-                       if c in gdf.columns:
-                           found_col = c
-                           break
-               
-                   if found_col is None:
-                       st.error("❌ Colonne identifiant l'aire introuvable dans ao_hlthArea.zip")
-                       st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
-                       st.stop()
-               
-                   if found_col != "health_area":
-                       gdf = gdf.rename(columns={found_col: "health_area"})
-                       st.info(f"ℹ️ Colonne '{found_col}' renommée en 'health_area'")
-               
-                   gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                   st.session_state.gdf_health = gdf
-                   st.sidebar.success(f"✅ {len(gdf)} aires chargées")
-               except Exception as e:
-                   st.error(f"❌ Erreur lecture fichier local : {str(e)}")
-                   st.stop()
+                                try:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        with zipfile.ZipFile(zip_path, "r") as z:
+                            z.extractall(tmpdir)
+                        shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                        if not shp_files:
+                            raise ValueError("Aucun fichier .shp trouvé dans le ZIP")
+                        gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
+
+                    gdf = ensure_wgs84(gdf)
+
+                    # Normaliser les noms de colonnes (même logique que rougeole)
+                    gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_")
+                                   for c in gdf.columns]
+
+                    # Détecter la colonne "aire de santé" (mapping rougeole)
+                    name_col = None
+                    for col in ["health_area", "healtharea", "namefr", "name",
+                                "NAME", "nom", "NOM", "aire_sante", "airesante"]:
+                        if col in gdf.columns:
+                            name_col = col
+                            break
+
+                    if name_col:
+                        gdf["health_area"] = gdf[name_col]
+                    else:
+                        gdf["health_area"] = [f"Aire{i+1}" for i in range(len(gdf))]
 
                     gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
                     st.session_state.gdf_health = gdf
                     st.sidebar.success(f"✅ {len(gdf)} aires chargées")
+
                 except Exception as e:
                     st.error(f"❌ Erreur lecture fichier local : {str(e)}")
                     st.stop()
+
 
             else:  # Upload manuel
                 health_file = st.file_uploader(
@@ -2827,6 +2815,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
