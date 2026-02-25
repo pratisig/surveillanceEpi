@@ -261,130 +261,139 @@ use_gee = gee_ok  # ✅ Utiliser le résultat de init_gee()
 # Fonction WorldPop UNIQUE
 # -------------------------
 @st.cache_data
-def worldpop_malaria_stats(_sa_gdf, use_gee):
+def worldpop_malaria_stats(_sa_gdf, use_gee, batch_size=20):
     """
-    Extrait population détaillée par sexe et âge (<35 ans) + totaux (WorldPop).
+    Récupère statistiques WorldPop par LOTS pour éviter le dépassement
+    de la limite de 10 MB du payload GEE.
+    Le GeoDataFrame passé doit déjà être filtré sur le pays/zone.
     """
-
     if not use_gee:
-        # Fallback vide
-        cols = ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
-        cols += [f'Pop_{sex}_{age}' for sex in ['M', 'F'] for age in ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']]
-        return pd.DataFrame({c: [np.nan]*len(_sa_gdf) for c in cols})
+        st.sidebar.warning("⚠️ WorldPop : GEE indisponible")
+        return _default_worldpop_df(_sa_gdf)
 
     try:
-        import ee
-        import shapely.geometry
-        
-        # ✅ CORRECTION : Utiliser le bon nom de dataset
         dataset = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex")
         pop_img = dataset.mosaic()
 
-        # ✅ TOUTES les bandes < 35 ans
-        male_bands = ['M_0', 'M_1', 'M_5', 'M_10', 'M_15', 'M_20', 'M_25', 'M_30']
-        female_bands = ['F_0', 'F_1', 'F_5', 'F_10', 'F_15', 'F_20', 'F_25', 'F_30']
+        male_bands   = ["M_0", "M_1", "M_5", "M_10"]
+        female_bands = ["F_0", "F_1", "F_5", "F_10"]
 
-        # ✅ Fonction qui prend pop_img en paramètre
-        def sum_groups(img, bands):
-            groups = {
-                '0_4': img.select(bands[0]).add(img.select(bands[1])),  # M_0 + M_1
-                '5_9': img.select(bands[2]),
-                '10_14': img.select(bands[3]),
-                '15_19': img.select(bands[4]),
-                '20_24': img.select(bands[5]),
-                '25_29': img.select(bands[6]),
-                '30_34': img.select(bands[7])
-            }
-            return groups
+        selected_males   = pop_img.select(male_bands)
+        selected_females = pop_img.select(female_bands)
+        total_pop        = pop_img.select(['population'])
+        males_sum    = selected_males.reduce(ee.Reducer.sum()).rename('garcons')
+        females_sum  = selected_females.reduce(ee.Reducer.sum()).rename('filles')
+        enfants      = males_sum.add(females_sum).rename('enfants')
+        pixel_area   = ee.Image.pixelArea().divide(10000)
 
-        male_groups = sum_groups(pop_img, male_bands)
-        female_groups = sum_groups(pop_img, female_bands)
+        final_mosaic = (total_pop
+                        .addBands(selected_males)
+                        .addBands(selected_females)
+                        .addBands(males_sum)
+                        .addBands(females_sum)
+                        .addBands(enfants))
+        final_mosaic_count = final_mosaic.multiply(pixel_area)
 
-        # Total population
-        total_img = pop_img.select('population')
-        
-        # Pixel area (km²)
-        pixel_area = ee.Image.pixelArea().divide(1e6)
-        total_count = total_img.multiply(pixel_area)
-        
-        # Calculer population par groupe + totaux
-        images = [total_count]
-        
-        for age in ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']:
-            images.append(male_groups[age].multiply(pixel_area).rename(f'male_{age}'))
-            images.append(female_groups[age].multiply(pixel_area).rename(f'female_{age}'))
+        # --- Simplification des géométries pour réduire le payload ---
+        gdf_simplified = _sa_gdf.copy()
+        gdf_simplified['geometry'] = gdf_simplified.geometry.simplify(
+            tolerance=0.01, preserve_topology=True
+        )
 
-        # Créer features GEE
-        features = []
-        for _, row in _sa_gdf.iterrows():
-            geom = ee.Geometry(row.geometry.__geo_interface__)
-            features.append(ee.Feature(geom, {"health_area": row["health_area"]}))
+        all_rows   = []
+        n          = len(gdf_simplified)
+        progress   = st.sidebar.progress(0)
+        status_txt = st.sidebar.empty()
 
-        fc = ee.FeatureCollection(features)
+        # Traitement par lots
+        for batch_start in range(0, n, batch_size):
+            batch_end   = min(batch_start + batch_size, n)
+            batch_gdf   = gdf_simplified.iloc[batch_start:batch_end]
+            status_txt.text(
+                f"📥 WorldPop {batch_start+1}–{batch_end}/{n}..."
+            )
 
-        # Combiner toutes les images et réduire
-        combined = ee.Image.cat(images)
-        
-        stats = combined.reduceRegions(
-            collection=fc,
-            reducer=ee.Reducer.sum(),
-            scale=100
-        ).getInfo()
+            features = []
+            for _, row in batch_gdf.iterrows():
+                geom = row['geometry']
+                props = {"health_area": str(row["health_area"])}
+                try:
+                    if geom.geom_type == 'Polygon':
+                        coords  = [[[x, y] for x, y in geom.exterior.coords]]
+                        ee_geom = ee.Geometry.Polygon(coords)
+                    elif geom.geom_type == 'MultiPolygon':
+                        coords  = [[[[x, y] for x, y in p.exterior.coords]]
+                                   for p in geom.geoms]
+                        ee_geom = ee.Geometry.MultiPolygon(coords)
+                    else:
+                        continue
+                    features.append(ee.Feature(ee_geom, props))
+                except Exception:
+                    continue
 
-        data = []
-        for f in stats["features"]:
-            props = f["properties"]
-            geom = shapely.geometry.shape(f["geometry"])
-            area_km2 = geom.area * 111 * 111  # km² approx
-            
-            # Total population
-            pop_tot = props.get("population", np.nan)
-            
-            # Somme enfants 0-14 (compatibilité)
-            enfants = sum([
-                props.get(f"male_{age}", 0) + props.get(f"female_{age}", 0) 
-                for age in ['0_4', '5_9', '10_14']
-            ])
-            
-            row_data = {
-                "health_area": props["health_area"],
-                "Pop_Totale": pop_tot,
-                "Pop_Enfants_0_14": enfants,
-                "Densite_Pop": pop_tot / area_km2 if area_km2 > 0 and pop_tot > 0 else np.nan
-            }
-            
-            # Ajouter toutes les tranches <35 ans
-            for sex in ['male', 'female']:
-                for age in ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']:
-                    row_data[f"Pop_{sex.upper()}_{age}"] = props.get(f"{sex}_{age}", np.nan)
-            
-            data.append(row_data)
+            if not features:
+                continue
 
-        df_result = pd.DataFrame(data)
-        
-        # Vérification et feedback
-        valid_count = df_result['Pop_Totale'].notna().sum()
-        if valid_count > 0:
-            st.success(f"✅ WorldPop : {valid_count}/{len(df_result)} aires extraites")
-            total = df_result['Pop_Totale'].sum()
-            st.info(f"📊 Population totale : {int(total):,} habitants")
-        else:
-            st.warning("⚠️ WorldPop : aucune donnée valide extraite")
-        
-        return df_result
+            fc    = ee.FeatureCollection(features)
+            stats = final_mosaic_count.reduceRegions(
+                collection=fc,
+                reducer=ee.Reducer.sum(),
+                scale=100,
+                crs='EPSG:4326'
+            )
+
+            try:
+                stats_info = stats.getInfo()  # ← Appel GEE limité au batch
+            except Exception as e:
+                st.sidebar.warning(
+                    f"⚠️ Batch {batch_start}–{batch_end} échoué : {e}"
+                )
+                # Remplir avec NaN pour ce batch
+                for _, row in batch_gdf.iterrows():
+                    all_rows.append(
+                        _nan_worldpop_row(row["health_area"])
+                    )
+                progress.progress(min(batch_end / n, 1.0))
+                continue
+
+            for feat in stats_info['features']:
+                p = feat['properties']
+                all_rows.append({
+                    "health_area":  p.get("health_area", ""),
+                    "Pop_Totale":   int(p.get("population", 0) or 0) or np.nan,
+                    "Pop_Garcons":  int(p.get("garcons", 0) or 0),
+                    "Pop_Filles":   int(p.get("filles",  0) or 0),
+                    "Pop_Enfants":  int(p.get("enfants", 0) or 0),
+                    "Pop_M_0":      int(p.get("M_0",  0) or 0),
+                    "Pop_M_1":      int(p.get("M_1",  0) or 0),
+                    "Pop_M_5":      int(p.get("M_5",  0) or 0),
+                    "Pop_M_10":     int(p.get("M_10", 0) or 0),
+                    "Pop_F_0":      int(p.get("F_0",  0) or 0),
+                    "Pop_F_1":      int(p.get("F_1",  0) or 0),
+                    "Pop_F_5":      int(p.get("F_5",  0) or 0),
+                    "Pop_F_10":     int(p.get("F_10", 0) or 0),
+                })
+            progress.progress(min(batch_end / n, 1.0))
+
+        progress.empty()
+        status_txt.text("✅ WorldPop terminé")
+        return pd.DataFrame(all_rows)
 
     except Exception as e:
-        st.error(f"❌ WorldPop erreur : {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        
-        return pd.DataFrame({
-            "health_area": _sa_gdf["health_area"].values,
-            "Pop_Totale": np.nan,
-            "Pop_Enfants_0_14": np.nan,
-            "Densite_Pop": np.nan
-        })
+        st.sidebar.error(f"❌ WorldPop erreur globale : {e}")
+        return _default_worldpop_df(_sa_gdf)
 
+
+def _nan_worldpop_row(health_area):
+    return {"health_area": health_area,
+            **{k: np.nan for k in ["Pop_Totale","Pop_Garcons","Pop_Filles",
+                                    "Pop_Enfants","Pop_M_0","Pop_M_1",
+                                    "Pop_M_5","Pop_M_10","Pop_F_0",
+                                    "Pop_F_1","Pop_F_5","Pop_F_10"]}}
+
+def _default_worldpop_df(_sa_gdf):
+    return pd.DataFrame([_nan_worldpop_row(a)
+                         for a in _sa_gdf["health_area"]])
 
 # ============================================================
 # AGRÉGATION PAR AIRE ET SEMAINE
@@ -2847,6 +2856,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
