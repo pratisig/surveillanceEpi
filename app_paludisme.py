@@ -364,7 +364,7 @@ def worldpop_malaria_stats(_sa_gdf, use_gee, batch_size=20):
                     "Pop_Totale":   int(p.get("population", 0) or 0) or np.nan,
                     "Pop_Garcons":  int(p.get("garcons", 0) or 0),
                     "Pop_Filles":   int(p.get("filles",  0) or 0),
-                    "Pop_Enfants":  int(p.get("enfants", 0) or 0),
+                    "Pop_Enfants_0_14":  int(p.get("enfants", 0) or 0),
                     "Pop_M_0":      int(p.get("M_0",  0) or 0),
                     "Pop_M_1":      int(p.get("M_1",  0) or 0),
                     "Pop_M_5":      int(p.get("M_5",  0) or 0),
@@ -388,7 +388,7 @@ def worldpop_malaria_stats(_sa_gdf, use_gee, batch_size=20):
 def _nan_worldpop_row(health_area):
     return {"health_area": health_area,
             **{k: np.nan for k in ["Pop_Totale","Pop_Garcons","Pop_Filles",
-                                    "Pop_Enfants","Pop_M_0","Pop_M_1",
+                                    "Pop_Enfants_0_14","Pop_M_0","Pop_M_1",
                                     "Pop_M_5","Pop_M_10","Pop_F_0",
                                     "Pop_F_1","Pop_F_5","Pop_F_10"]}}
 
@@ -693,8 +693,8 @@ def create_population_features(df):
         df["incidence_rate"] = df["incidence_rate"].replace([np.inf, -np.inf], np.nan).fillna(0)
 
     # Risque enfants (cas pour 1 000 enfants 0-14 ans)
-    if "Pop_Enfants_0_14" in df.columns:
-        df["child_risk"] = (df["cases"] / df["Pop_Enfants_0_14"] * 1000)
+    if "Pop_Enfants_0_14_0_14" in df.columns:
+        df["child_risk"] = (df["cases"] / df["Pop_Enfants_0_14_0_14"] * 1000)
         df["child_risk"] = df["child_risk"].replace([np.inf, -np.inf], np.nan).fillna(0)
 
     # Pression démographique (densité × incidence)
@@ -1084,7 +1084,7 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
                 if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
                     gdf = gdf.merge(
-                        dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']],
+                        dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14_0_14', 'Densite_Pop']],
                         on='health_area',
                         how='left'
                     )
@@ -1326,7 +1326,7 @@ with tab1:
             with colp1:
                 st.metric("Population totale", f"{int(df_pop['Pop_Totale'].sum()):,}".replace(",", " "))
             with colp2:
-                st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " "))
+                st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14_0_14'].sum()):,}".replace(",", " "))
             with colp3:
                 st.metric("Densité moyenne", f"{df_pop['Densite_Pop'].mean():.1f} hab/km²")
         # Section climat
@@ -1365,7 +1365,7 @@ with tab1:
                     df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
             
                 total_pop = df_pop["Pop_Totale"].sum()
-                enfants_0_14 = df_pop.get("Pop_Enfants_0_14", pd.Series([0]*len(df_pop))).sum()
+                enfants_0_14 = df_pop.get("Pop_Enfants_0_14_0_14", pd.Series([0]*len(df_pop))).sum()
             
                 st.markdown("---")
                 st.subheader("👥 Pyramide des âges")
@@ -1705,7 +1705,7 @@ with tab2:
         
         # ✅ MERGER POPULATION dans gdf_map
         if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None:
-            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
+            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14_0_14', 'Densite_Pop']].copy()
             gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
             pop_count = gdf_map['Pop_Totale'].notna().sum()
             st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
@@ -1846,8 +1846,8 @@ with tab2:
             # Population (si disponible)
             if 'Pop_Totale' in gdf_map.columns and pd.notna(row.get('Pop_Totale')):
                 popup_html += f"<tr style='background:#F3E5F5;'><td><b>👥 Population:</b></td><td>{int(row['Pop_Totale']):,}</td></tr>"
-            if 'Pop_Enfants_0_14' in gdf_map.columns and pd.notna(row.get('Pop_Enfants_0_14')):
-                popup_html += f"<tr style='background:#E8F5E9;'><td><b>👶 Enfants 0–14:</b></td><td>{int(row['Pop_Enfants_0_14']):,}</td></tr>"
+            if 'Pop_Enfants_0_14_0_14' in gdf_map.columns and pd.notna(row.get('Pop_Enfants_0_14_0_14')):
+                popup_html += f"<tr style='background:#E8F5E9;'><td><b>👶 Enfants 0–14:</b></td><td>{int(row['Pop_Enfants_0_14_0_14']):,}</td></tr>"
             if 'Densite_Pop' in gdf_map.columns and pd.notna(row.get('Densite_Pop')):
                 popup_html += f"<tr style='background:#FFF3E0;'><td><b>📏 Densité:</b></td><td>{safe_float(row['Densite_Pop']):.2f} hab/km²</td></tr>"
             
@@ -2039,12 +2039,12 @@ with tab3:
                     if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:  # ✅
 
                         gdf_env = gdf_env.merge(
-                           st.session_state.dfpopulation[["health_area", "Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"]],
+                           st.session_state.dfpopulation[["health_area", "Pop_Totale", "Pop_Enfants_0_14_0_14", "Densite_Pop"]],
                             on="health_area",
                             how="left"
                         )
                         static_env_cols.extend(
-                            [c for c in ["Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"] if c in gdf_env.columns]
+                            [c for c in ["Pop_Totale", "Pop_Enfants_0_14_0_14", "Densite_Pop"] if c in gdf_env.columns]
                         )
 
                     static_env_cols = [c for c in static_env_cols if c in gdf_env.columns]
@@ -2111,7 +2111,7 @@ with tab3:
                     # 🧮 Features population
                     pop_features = [
                         "Pop_Totale",
-                        "Pop_Enfants_0_14",
+                        "Pop_Enfants_0_14_0_14",
                         "Densite_Pop",
                         "incidence_rate",
                         "child_risk",
@@ -2399,7 +2399,7 @@ with tab4:
         
         # ✅ NOUVEAU : Ajouter population à df_corr
         if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
-            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
+            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14_0_14', 'Densite_Pop']].copy()
             df_corr = df_corr.merge(df_pop, on='health_area', how='left')
             st.info("✅ Données population mergées dans l'analyse")
         else:
@@ -2850,6 +2850,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
