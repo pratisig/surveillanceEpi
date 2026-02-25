@@ -939,7 +939,7 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     st.error(f"❌ Fichier non trouvé : {zip_path}")
                     st.info("📁 Placez 'ao_hlthArea.zip' dans le dossier 'data/'")
                     st.stop()
-                                try:
+                try:
                     with tempfile.TemporaryDirectory() as tmpdir:
                         with zipfile.ZipFile(zip_path, "r") as z:
                             z.extractall(tmpdir)
@@ -947,34 +947,24 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                         if not shp_files:
                             raise ValueError("Aucun fichier .shp trouvé dans le ZIP")
                         gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
-
                     gdf = ensure_wgs84(gdf)
-
-                    # Normaliser les noms de colonnes (même logique que rougeole)
-                    gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_")
-                                   for c in gdf.columns]
-
-                    # Détecter la colonne "aire de santé" (mapping rougeole)
+                    # Mapping colonnes (même logique que rougeole)
+                    gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in gdf.columns]
                     name_col = None
-                    for col in ["health_area", "healtharea", "namefr", "name",
-                                "NAME", "nom", "NOM", "aire_sante", "airesante"]:
+                    for col in ["health_area", "healtharea", "namefr", "name", "nom", "aire_sante", "airesante"]:
                         if col in gdf.columns:
                             name_col = col
                             break
-
                     if name_col:
                         gdf["health_area"] = gdf[name_col]
                     else:
                         gdf["health_area"] = [f"Aire{i+1}" for i in range(len(gdf))]
-
                     gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
                     st.session_state.gdf_health = gdf
                     st.sidebar.success(f"✅ {len(gdf)} aires chargées")
-
                 except Exception as e:
                     st.error(f"❌ Erreur lecture fichier local : {str(e)}")
                     st.stop()
-
 
             else:  # Upload manuel
                 health_file = st.file_uploader(
@@ -984,34 +974,51 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 )
                 if health_file:
                     try:
-                        gdf = gpd.read_file(health_file)
-                        gdf = ensure_wgs84(gdf)
-                        if "health_area" not in gdf.columns:
-                            st.error("❌ Colonne 'health_area' absente")
+                        if health_file.name.endswith(".zip"):
+                            with tempfile.TemporaryDirectory() as tmpdir:
+                                zip_path_up = os.path.join(tmpdir, "upload.zip")
+                                with open(zip_path_up, "wb") as f:
+                                    f.write(health_file.getvalue())
+                                with zipfile.ZipFile(zip_path_up, "r") as z:
+                                    z.extractall(tmpdir)
+                                shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                                if shp_files:
+                                    gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
+                                else:
+                                    raise ValueError("Aucun .shp dans le ZIP uploadé")
                         else:
-                            gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                            st.session_state.gdf_health = gdf
-                            st.success(f"✅ {len(gdf)} aires chargées")
+                            gdf = gpd.read_file(health_file)
+                        gdf = ensure_wgs84(gdf)
+                        # Mapping colonnes (même logique que rougeole)
+                        gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in gdf.columns]
+                        name_col = None
+                        for col in ["health_area", "healtharea", "namefr", "name", "nom", "aire_sante", "airesante"]:
+                            if col in gdf.columns:
+                                name_col = col
+                                break
+                        if name_col:
+                            gdf["health_area"] = gdf[name_col]
+                        else:
+                            gdf["health_area"] = [f"Aire{i+1}" for i in range(len(gdf))]
+                        gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                        st.session_state.gdf_health = gdf
+                        st.success(f"✅ {len(gdf)} aires chargées")
                     except Exception as e:
                         st.error(f"❌ Erreur lecture : {str(e)}")
 
     # ── WorldPop (déclenché dès qu'un GDF est chargé) ─────────
     if st.session_state.gdf_health is not None:
         gdf = st.session_state.gdf_health
-
         if 'dfpopulation' not in st.session_state:
             with st.spinner("📥 Extraction population WorldPop..."):
                 if not use_gee:
                     st.warning("⚠️ GEE non initialisé - WorldPop désactivé")
                     st.info("💡 Vérifiez les secrets Streamlit (GEE_SERVICE_ACCOUNT)")
-
                 dfpopulation = worldpop_malaria_stats(gdf, use_gee)
-
                 st.info(f"📊 DataFrame retourné : {len(dfpopulation)} lignes")
                 if not dfpopulation.empty:
                     st.info(f"📊 Colonnes : {list(dfpopulation.columns)}")
                     st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
-
                 if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
                     gdf = gdf.merge(
                         dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']],
@@ -1043,25 +1050,21 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         key="cases_palu"
     )
     if cases_file:
+        separator = None  # ← initialisé AVANT le try pour éviter NameError dans except
         try:
             cases_file.seek(0)
             first_line = cases_file.readline().decode('utf-8').strip()
             cases_file.seek(0)
-
-            if '\t' in first_line:
+            if '\t' in first_line:       # ← corrigé : '\t' au lieu de '\\t'
                 separator = '\t'
             elif ';' in first_line:
                 separator = ';'
             elif ',' in first_line:
                 separator = ','
-            else:
-                separator = None
-
             if separator:
                 df = pd.read_csv(cases_file, sep=separator, encoding='utf-8')
             else:
                 df = pd.read_csv(cases_file, sep=None, engine='python', encoding='utf-8')
-
         except UnicodeDecodeError:
             cases_file.seek(0)
             try:
@@ -1080,30 +1083,22 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         if df is not None:
             df.columns = (df.columns.str.strip().str.lower()
                          .str.replace(' ', '_').str.replace('-', '_'))
-
             required = {"health_area", "week_", "cases"}
-
             if required.issubset(set(df.columns)):
                 st.success("✅ Toutes les colonnes requises sont présentes")
-
                 df["health_area"] = df["health_area"].astype(str).str.strip().str.lower()
-
                 if "deaths" not in df.columns:
                     df["deaths"] = 0
                     st.info("ℹ️ Colonne 'deaths' ajoutée avec valeur 0")
-
                 df["week_"] = normalize_week_format(df["week_"])
                 df["cases"] = pd.to_numeric(df["cases"], errors='coerce').fillna(0).astype(int)
                 df["deaths"] = pd.to_numeric(df["deaths"], errors='coerce').fillna(0).astype(int)
                 df["week_"] = pd.to_numeric(df["week_"], errors='coerce').fillna(1).astype(int)
                 df = df[(df["cases"] >= 0) & (df["week_"] > 0)]
-
                 st.session_state.df_cases = df
                 st.success(f"✅ {len(df)} enregistrements chargés")
-
                 with st.expander("👁️ Aperçu des 5 premières lignes"):
                     st.dataframe(df.head())
-
                 with st.expander("📊 Statistiques"):
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Total cas", int(df["cases"].sum()))
@@ -1115,14 +1110,12 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 st.error(f"📋 Colonnes trouvées : {list(df.columns)}")
 
 
-
 # === API CLIMAT - MULTIPLE SOURCES ===
 with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
     use_climate_api = st.checkbox("Activer API Climat", value=False, key="use_climate_toggle")
-    
+
     if use_climate_api:
         st.markdown("### 📡 Choix de la Source")
-        
         api_choice = st.radio(
             "Source de données climatiques",
             ["NASA POWER", "Open-Meteo"],
@@ -1131,7 +1124,6 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             **Open-Meteo**: Excellent, gratuit, sans inscription
             """
         )
-        
         if api_choice == "NASA POWER":
             st.info("""
             📡 **NASA POWER**
@@ -1140,7 +1132,6 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             - ✅ Données depuis 1981
             - ⏱️ Temps de réponse : ~1-2 min
             """)
-        
         elif api_choice == "Open-Meteo":
             st.info("""
             📡 **Open-Meteo Archive**
@@ -1149,81 +1140,79 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             - ✅ Données depuis 1940
             - ⚡ Très rapide (~30 sec)
             """)
-        
+
         if st.session_state.gdf_health is not None and st.session_state.df_cases is not None:
-            
-            # Année de référence
             year_input = st.number_input(
                 "📅 Année des données",
-                min_value=2020,
-                max_value=2025,
-                value=2024,
+                min_value=2020, max_value=2025, value=2024,
                 help="Année correspondant aux semaines du CSV"
             )
-            
-            # Statut données existantes
             if st.session_state.df_climate_aggregated is not None:
                 nb_records = len(st.session_state.df_climate_aggregated)
                 st.success(f"✅ {nb_records} enregistrements climat en mémoire")
-                
                 df_clim = st.session_state.df_climate_aggregated
                 col1, col2, col3 = st.columns(3)
-                
                 if 'temp_api' in df_clim.columns:
                     col1.metric("🌡️ Temp. moy", f"{df_clim['temp_api'].mean():.1f}°C")
                 if 'precip_api' in df_clim.columns:
                     col2.metric("🌧️ Précip. moy", f"{df_clim['precip_api'].mean():.1f}mm")
                 if 'humidity_api' in df_clim.columns:
                     col3.metric("💧 Humid. moy", f"{df_clim['humidity_api'].mean():.1f}%")
-                
-                # Bouton pour réinitialiser
                 if st.button("🔄 Réinitialiser données climat", key="reset_climate"):
                     st.session_state.df_climate_aggregated = None
                     st.success("✅ Données climat effacées")
                     st.rerun()
             else:
                 st.info("ℹ️ Aucune donnée climat chargée")
-            
+
             if st.button("🚀 Télécharger Données Climatiques", key="download_climate", type="primary"):
                 with st.spinner(f"⏳ Téléchargement depuis {api_choice}..."):
-                    
                     gdf_health = st.session_state.gdf_health
                     df_cases = st.session_state.df_cases
-                    
-                    # Bbox pour info
                     bounds = gdf_health.total_bounds
                     st.info(f"📍 Zone : [{bounds[1]:.2f}°W à {bounds[3]:.2f}°E, {bounds[0]:.2f}°S à {bounds[2]:.2f}°N]")
-                    
-                    # Agréger
                     df_climate_agg = aggregate_climate_by_week_and_area(
                         gdf_health, df_cases, year_input, api_choice
                     )
-                    
                     if not df_climate_agg.empty:
                         st.session_state.df_climate_aggregated = df_climate_agg
-                        st.success(f"🎉 Données climatiques intégrées avec succès !")
+                        st.success("🎉 Données climatiques intégrées avec succès !")
                     else:
-                        st.error(" Aucune donnée climatique récupérée")
+                        st.error("❌ Aucune donnée climatique récupérée")
         else:
             st.warning("⚠️ Chargez d'abord les aires de santé et les cas")
+
 
 with st.sidebar.expander("🌍 Données Environnementales", expanded=False):
     flood_file = st.file_uploader("🌊 Raster inondation (TIF)", type=["tif"], key="flood")
     if flood_file:
         st.session_state.flood_raster = rasterio.open(flood_file)
         st.success("✅ Inondation chargée")
-    
     elev_file = st.file_uploader("⛰️ Raster élévation (TIF)", type=["tif"], key="elevation")
     if elev_file:
         st.session_state.elevation_raster = rasterio.open(elev_file)
         st.success("✅ Élévation chargée")
-    
     river_file = st.file_uploader("🏞️ Rivières (GeoJSON/SHP/ZIP)", type=["geojson","shp","zip"], key="rivers")
     if river_file:
         rivers_gdf = gpd.read_file(river_file)
         rivers_gdf = ensure_wgs84(rivers_gdf)
         st.session_state.rivers_gdf = rivers_gdf
         st.success(f"✅ {len(rivers_gdf)} cours d'eau")
+
+
+# ============================================================
+# FILTRES
+# ============================================================
+st.sidebar.header("🔍 Filtres")
+gdf_health = st.session_state.gdf_health
+df_cases = st.session_state.df_cases
+
+week_selected = None
+area_selected = None
+if df_cases is not None:
+    week_selected = st.sidebar.multiselect("Semaines", sorted(df_cases["week_"].unique()))
+    area_selected = st.sidebar.multiselect("Aires de santé", sorted(df_cases["health_area"].unique()))
+
 
 # ============================================================
 # FILTRES
@@ -2815,6 +2804,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
