@@ -916,71 +916,106 @@ def perform_pca_analysis(df, feature_cols, explained_variance_threshold=0.95):
 st.sidebar.header("📁 Chargement des Données")
 
 with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
-    health_file = st.file_uploader("Aires de santé (GeoJSON/SHP/ZIP)", type=["geojson","shp","zip"], key="health")
-    
-    if health_file:
-        gdf = gpd.read_file(health_file)
-        gdf = ensure_wgs84(gdf)
-        
-        if "health_area" not in gdf.columns:
-            st.error("❌ Colonne 'health_area' absente")
+
+    # ── Choix de la source géographique ──────────────────────
+    source_geo = st.radio(
+        "Source des Aires de Santé",
+        ["📂 Fichier local (ao_hlthArea.zip)", "📤 Charger un fichier"],
+        key="source_geo_palu"
+    )
+
+    if source_geo == "📂 Fichier local (ao_hlthArea.zip)":
+        import os
+        local_path = "ao_hlthArea.zip"
+        if os.path.exists(local_path):
+            try:
+                gdf = gpd.read_file(f"zip://{local_path}")
+                gdf = ensure_wgs84(gdf)
+                if "health_area" not in gdf.columns:
+                    st.error("❌ Colonne 'health_area' absente dans ao_hlthArea.zip")
+                else:
+                    gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                    st.session_state.gdf_health = gdf
+                    st.success(f"✅ {len(gdf)} aires chargées (fichier local)")
+            except Exception as e:
+                st.error(f"❌ Erreur lecture fichier local : {str(e)}")
         else:
-            gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-            st.session_state.gdf_health = gdf
-            st.success(f"✅ {len(gdf)} aires chargées")
-            
-            # Téléchargement automatique WorldPop
-            if 'dfpopulation' not in st.session_state:
-                with st.spinner("📥 Extraction population WorldPop..."):
-                    # Debug : vérifier use_gee
-                    if not use_gee:
-                        st.warning("⚠️ GEE non initialisé - WorldPop désactivé")
-                        st.info("💡 Vérifiez les secrets Streamlit (GEE_SERVICE_ACCOUNT)")
-                    
-                    dfpopulation = worldpop_malaria_stats(gdf, use_gee)
-                    
-                    # Debug : afficher résultat
-                    st.info(f"📊 DataFrame retourné : {len(dfpopulation)} lignes")
-                    if not dfpopulation.empty:
-                        st.info(f"📊 Colonnes : {list(dfpopulation.columns)}")
-                        st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
-                    
-                    if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
-                        gdf = gdf.merge(
-                            dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']], 
-                            on='health_area', 
-                            how='left'
-                        )
-                        
-                        st.session_state.gdf_health = gdf
-                        st.session_state.dfpopulation = dfpopulation
-                        
-                        total_pop = dfpopulation['Pop_Totale'].sum()
-                        st.success(f"✅ Population : {int(total_pop):,} habitants")
+            st.warning("⚠️ Fichier 'ao_hlthArea.zip' introuvable sur le serveur.")
+            st.info("💡 Placez ao_hlthArea.zip à la racine du projet.")
+        health_file = None  # pas de uploader dans ce mode
+
+    else:  # Upload manuel
+        health_file = st.file_uploader(
+            "Aires de santé (GeoJSON/SHP/ZIP)",
+            type=["geojson", "shp", "zip"],
+            key="health_palu"
+        )
+        if health_file:
+            try:
+                gdf = gpd.read_file(health_file)
+                gdf = ensure_wgs84(gdf)
+                if "health_area" not in gdf.columns:
+                    st.error("❌ Colonne 'health_area' absente")
+                else:
+                    gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                    st.session_state.gdf_health = gdf
+                    st.success(f"✅ {len(gdf)} aires chargées")
+            except Exception as e:
+                st.error(f"❌ Erreur lecture : {str(e)}")
+
+    # ── WorldPop (déclenché dès qu'un GDF est chargé) ─────────
+    if st.session_state.gdf_health is not None:
+        gdf = st.session_state.gdf_health
+
+        if 'dfpopulation' not in st.session_state:
+            with st.spinner("📥 Extraction population WorldPop..."):
+                if not use_gee:
+                    st.warning("⚠️ GEE non initialisé - WorldPop désactivé")
+                    st.info("💡 Vérifiez les secrets Streamlit (GEE_SERVICE_ACCOUNT)")
+
+                dfpopulation = worldpop_malaria_stats(gdf, use_gee)
+
+                st.info(f"📊 DataFrame retourné : {len(dfpopulation)} lignes")
+                if not dfpopulation.empty:
+                    st.info(f"📊 Colonnes : {list(dfpopulation.columns)}")
+                    st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
+
+                if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
+                    gdf = gdf.merge(
+                        dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']],
+                        on='health_area',
+                        how='left'
+                    )
+                    st.session_state.gdf_health = gdf
+                    st.session_state.dfpopulation = dfpopulation
+                    total_pop = dfpopulation['Pop_Totale'].sum()
+                    st.success(f"✅ Population : {int(total_pop):,} habitants")
+                else:
+                    st.warning("⚠️ WorldPop non disponible (DataFrame vide ou que des NaN)")
+                    if dfpopulation.empty:
+                        st.error("❌ DataFrame complètement vide")
                     else:
-                        st.warning("⚠️ WorldPop non disponible (DataFrame vide ou que des NaN)")
-                        if dfpopulation.empty:
-                            st.error("❌ DataFrame complètement vide")
-                        else:
-                            st.warning(f"⚠️ Toutes les valeurs sont NaN (vérifier GEE)")
+                        st.warning("⚠️ Toutes les valeurs sont NaN (vérifier GEE)")
 
-            
-            # Affichage stats
-            if 'dfpopulation' in st.session_state and not st.session_state.dfpopulation.empty:
-                dfpop = st.session_state.dfpopulation
-                col1, col2 = st.sidebar.columns(2)
-                col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
-                col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
+        # ── Stats population ──────────────────────────────────
+        if 'dfpopulation' in st.session_state and not st.session_state.dfpopulation.empty:
+            dfpop = st.session_state.dfpopulation
+            col1, col2 = st.sidebar.columns(2)
+            col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
+            col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
 
-                
-                 # 📊 Cas hebdomadaires
-    cases_file = st.file_uploader("Cas hebdomadaires (CSV)", type=["csv", "txt", "tsv"], key="cases")
+    # ── Cas hebdomadaires (CSV) ────────────────────────────────
+    cases_file = st.file_uploader(
+        "Cas hebdomadaires (CSV)",
+        type=["csv", "txt", "tsv"],
+        key="cases_palu"
+    )
     if cases_file:
         try:
             cases_file.seek(0)
             first_line = cases_file.readline().decode('utf-8').strip()
             cases_file.seek(0)
-            
+
             if '\t' in first_line:
                 separator = '\t'
             elif ';' in first_line:
@@ -989,12 +1024,12 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 separator = ','
             else:
                 separator = None
-            
+
             if separator:
                 df = pd.read_csv(cases_file, sep=separator, encoding='utf-8')
             else:
                 df = pd.read_csv(cases_file, sep=None, engine='python', encoding='utf-8')
-            
+
         except UnicodeDecodeError:
             cases_file.seek(0)
             try:
@@ -1004,41 +1039,39 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     df = pd.read_csv(cases_file, sep=None, engine='python', encoding='latin-1')
                 st.warning("⚠️ Encodage Latin-1 utilisé")
             except Exception as e:
-                st.error(f" Erreur de lecture : {str(e)}")
+                st.error(f"❌ Erreur de lecture : {str(e)}")
                 df = None
         except Exception as e:
-            st.error(f" Erreur : {str(e)}")
+            st.error(f"❌ Erreur : {str(e)}")
             df = None
-        
+
         if df is not None:
             df.columns = (df.columns.str.strip().str.lower()
                          .str.replace(' ', '_').str.replace('-', '_'))
-            
+
             required = {"health_area", "week_", "cases"}
-            
+
             if required.issubset(set(df.columns)):
                 st.success("✅ Toutes les colonnes requises sont présentes")
-                
+
                 df["health_area"] = df["health_area"].astype(str).str.strip().str.lower()
-                
+
                 if "deaths" not in df.columns:
                     df["deaths"] = 0
                     st.info("ℹ️ Colonne 'deaths' ajoutée avec valeur 0")
-                
+
                 df["week_"] = normalize_week_format(df["week_"])
-                
                 df["cases"] = pd.to_numeric(df["cases"], errors='coerce').fillna(0).astype(int)
                 df["deaths"] = pd.to_numeric(df["deaths"], errors='coerce').fillna(0).astype(int)
                 df["week_"] = pd.to_numeric(df["week_"], errors='coerce').fillna(1).astype(int)
-                
                 df = df[(df["cases"] >= 0) & (df["week_"] > 0)]
-                
+
                 st.session_state.df_cases = df
                 st.success(f"✅ {len(df)} enregistrements chargés")
-                
+
                 with st.expander("👁️ Aperçu des 5 premières lignes"):
                     st.dataframe(df.head())
-                
+
                 with st.expander("📊 Statistiques"):
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Total cas", int(df["cases"].sum()))
@@ -1046,8 +1079,9 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     col3.metric("Aires uniques", df["health_area"].nunique())
             else:
                 missing = required - set(df.columns)
-                st.error(f" Colonnes manquantes : {missing}")
+                st.error(f"❌ Colonnes manquantes : {missing}")
                 st.error(f"📋 Colonnes trouvées : {list(df.columns)}")
+
 
 # === API CLIMAT - MULTIPLE SOURCES ===
 with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
@@ -2748,6 +2782,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
