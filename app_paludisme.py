@@ -930,17 +930,10 @@ def perform_pca_analysis(df, feature_cols, explained_variance_threshold=0.95):
 # ============================================================
 
 PAYS_ISO3_MAP = {
-    "Angola": "ago", "Bénin": "ben", "Burkina Faso": "bfa",
-    "Cameroun": "cmr", "Congo": "cog", "Côte d'Ivoire": "civ",
-    "DRC": "cod", "Gabon": "gab", "Ghana": "gha",
-    "Guinée": "gin", "Guinée-Bissau": "gnb", "Guinée Équatoriale": "gnq",
-    "Kenya": "ken", "Liberia": "lbr", "Madagascar": "mdg",
-    "Malawi": "mwi", "Mali": "mli", "Mauritanie": "mrt",
-    "Mozambique": "moz", "Niger": "ner", "Nigeria": "nga",
-    "Ouganda": "uga", "RCA": "caf", "Rwanda": "rwa",
-    "Sénégal": "sen", "Sierra Leone": "sle", "Soudan du Sud": "ssd",
-    "Tanzanie": "tza", "Tchad": "tcd", "Togo": "tgo",
-    "Zambie": "zmb", "Zimbabwe": "zwe",
+    "Burkina Faso": "bfa",
+   "Mali": "mli", "Mauritanie": "mrt",
+    "Niger": "ner", 
+    
 }
 
 st.sidebar.header("📁 Chargement des Données")
@@ -2857,6 +2850,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
