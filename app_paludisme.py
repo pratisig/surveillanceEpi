@@ -1764,8 +1764,13 @@ with tab2:
                     on='health_area', how='left'
                 )
             gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
-            pop_count = gdf_map['Pop_Totale'].notna().sum()
-            st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
+            if 'Pop_Totale' in gdf_map.columns:
+                pop_count = gdf_map['Pop_Totale'].notna().sum()
+                st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
+            else:
+                gdf_map['Pop_Totale'] = np.nan
+                gdf_map['Pop_Enfants_0_14'] = np.nan
+                st.warning("⚠️ Colonne Pop_Totale absente après merge — population initialisée à NaN")
 
         
         # Ajouter moyennes climatiques
@@ -2920,6 +2925,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
