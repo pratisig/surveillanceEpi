@@ -1072,32 +1072,22 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
     if st.session_state.gdf_health is not None:
         gdf = st.session_state.gdf_health
 
-        if 'dfpopulation' not in st.session_state:
-            with st.spinner("📥 Extraction population WorldPop..."):
-                if not use_gee:
-                    st.warning("⚠️ GEE non initialisé - WorldPop désactivé")
-                    st.info("💡 Vérifiez les secrets Streamlit (GEE_SERVICE_ACCOUNT)")
-                dfpopulation = worldpop_malaria_stats(gdf, use_gee)
-                st.info(f"📊 DataFrame retourné : {len(dfpopulation)} lignes")
-                if not dfpopulation.empty:
-                    st.info(f"📊 Colonnes : {list(dfpopulation.columns)}")
-                    st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
-                if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
-                   merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14'] if c in dfpopulation.columns]
-                   gdf = gdf.merge(dfpopulation[merge_cols], on='health_area', how='left')
-               
-                   # Calcul Densite_Pop après merge (elle n'existe pas dans dfpopulation)
-                   if 'Pop_Totale' in gdf.columns:
-                       gdf_proj = gdf.to_crs('ESRI:54009')
-                       gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
-                       gdf['Densite_Pop'] = (gdf['Pop_Totale'] / gdf['Superficie_km2'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
-                   else:
-                       gdf['Densite_Pop'] = np.nan
-               
-                   st.session_state.gdf_health = gdf
-                   st.session_state.dfpopulation = dfpopulation
-                   total_pop = dfpopulation['Pop_Totale'].sum()
-                   st.success(f"✅ Population : {int(total_pop):,} habitants")
+        if st.session_state.gdf_health is not None and st.session_state.get("dfpopulation") is None:
+             with st.spinner("📥 Chargement population WorldPop..."):
+                 dfpopulation = worldpop_malaria_stats(st.session_state.gdf_health, use_gee)
+                 if not dfpopulation.empty:
+                     merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
+                                   if c in dfpopulation.columns]
+                     gdf = st.session_state.gdf_health.merge(dfpopulation[merge_cols], on='health_area', how='left')
+                     if 'Pop_Totale' in gdf.columns:
+                         gdf_proj = gdf.to_crs('ESRI:54009')
+                         gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
+                         gdf['Densite_Pop'] = (gdf['Pop_Totale'] / gdf['Superficie_km2'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+                     else:
+                         gdf['Densite_Pop'] = np.nan
+                     st.session_state.gdf_health = gdf
+                     st.session_state.dfpopulation = dfpopulation
+                     st.sidebar.success(f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants")
 
                 else:
                     st.warning("⚠️ WorldPop non disponible (DataFrame vide ou que des NaN)")
@@ -1208,7 +1198,11 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             - ✅ Données depuis 1940
             - ⚡ Très rapide (~30 sec)
             """)
-        if st.session_state.gdf_health is not None and st.session_state.df_cases is not None:
+                if st.session_state.gdf_health is None:
+            st.warning("⚠️ Chargez d'abord les aires de santé")
+        else:
+            if st.session_state.df_cases is None:
+                st.info("ℹ️ Les aires de santé sont prêtes. Chargez un fichier de cas (CSV) pour associer le climat aux semaines.")
             year_input = st.number_input(
                 "📅 Année des données",
                 min_value=2020, max_value=2025, value=2024,
@@ -1231,22 +1225,26 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
                     st.rerun()
             else:
                 st.info("ℹ️ Aucune donnée climat chargée")
-            if st.button("🚀 Télécharger Données Climatiques", key="download_climate", type="primary"):
-                with st.spinner(f"⏳ Téléchargement depuis {api_choice}..."):
-                    gdf_health = st.session_state.gdf_health
-                    df_cases = st.session_state.df_cases
-                    bounds = gdf_health.total_bounds
-                    st.info(f"📍 Zone : [{bounds[1]:.2f}°W à {bounds[3]:.2f}°E, {bounds[0]:.2f}°S à {bounds[2]:.2f}°N]")
-                    df_climate_agg = aggregate_climate_by_week_and_area(
-                        gdf_health, df_cases, year_input, api_choice
-                    )
-                    if not df_climate_agg.empty:
-                        st.session_state.df_climate_aggregated = df_climate_agg
-                        st.success("🎉 Données climatiques intégrées avec succès !")
-                    else:
-                        st.error("❌ Aucune donnée climatique récupérée")
-        else:
-            st.warning("⚠️ Chargez d'abord les aires de santé et les cas")
+            # Le bouton téléchargement nécessite les cas pour les semaines
+            if st.session_state.df_cases is not None:
+                if st.button("🚀 Télécharger Données Climatiques", key="download_climate", type="primary"):
+                    with st.spinner(f"⏳ Téléchargement depuis {api_choice}..."):
+                        gdf_health = st.session_state.gdf_health
+                        df_cases = st.session_state.df_cases
+                        bounds = gdf_health.total_bounds
+                        st.info(f"📍 Zone : [{bounds[1]:.2f}°W à {bounds[3]:.2f}°E, {bounds[0]:.2f}°S à {bounds[2]:.2f}°N]")
+                        df_climate_agg = aggregate_climate_by_week_and_area(
+                            gdf_health, df_cases, year_input, api_choice
+                        )
+                        if not df_climate_agg.empty:
+                            st.session_state.df_climate_aggregated = df_climate_agg
+                            st.success("🎉 Données climatiques intégrées avec succès !")
+                        else:
+                            st.error("❌ Aucune donnée climatique récupérée")
+            else:
+                st.button("🚀 Télécharger Données Climatiques", disabled=True, 
+                          key="download_climate", help="Chargez d'abord le CSV des cas")
+
 
 
 with st.sidebar.expander("🌍 Données Environnementales", expanded=False):
@@ -2052,16 +2050,18 @@ with tab3:
                     if 'flood_risk' in gdf_env.columns:
                         static_env_cols.append('flood_risk')
                     # Intégration population dans gdf_env
-                    if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:  # ✅
+                    if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
+                         pop_cols_dispo = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
+                                           if c in st.session_state.dfpopulation.columns]
+                         df_pop_env = st.session_state.dfpopulation[pop_cols_dispo].copy()
+                         if 'Densite_Pop' in st.session_state.gdf_health.columns:
+                             df_pop_env = df_pop_env.merge(
+                                 st.session_state.gdf_health[['health_area', 'Densite_Pop']],
+                                 on='health_area', how='left'
+                             )
+                         gdf_env = gdf_env.merge(df_pop_env, on='health_area', how='left')
+                         static_env_cols.extend(c for c in ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop'] if c in gdf_env.columns)
 
-                        gdf_env = gdf_env.merge(
-                           st.session_state.dfpopulation[["health_area", "Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"]],
-                            on="health_area",
-                            how="left"
-                        )
-                        static_env_cols.extend(
-                            [c for c in ["Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"] if c in gdf_env.columns]
-                        )
 
                     static_env_cols = [c for c in static_env_cols if c in gdf_env.columns]
                     if static_env_cols:
@@ -2415,11 +2415,18 @@ with tab4:
         
         # ✅ NOUVEAU : Ajouter population à df_corr
         if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
-            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
-            df_corr = df_corr.merge(df_pop, on='health_area', how='left')
-            st.info("✅ Données population mergées dans l'analyse")
-        else:
-            st.warning("⚠️ Population non disponible pour cette analyse")
+             pop_cols_dispo = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
+                               if c in st.session_state.dfpopulation.columns]
+             df_pop = st.session_state.dfpopulation[pop_cols_dispo].copy()
+             # Ajouter Densite_Pop depuis gdf_health si calculée
+             if 'Densite_Pop' in st.session_state.gdf_health.columns:
+                 df_pop = df_pop.merge(
+                     st.session_state.gdf_health[['health_area', 'Densite_Pop']],
+                     on='health_area', how='left'
+                 )
+             df_corr = df_corr.merge(df_pop, on='health_area', how='left')
+             st.info("Données population mergées dans l'analyse")
+
         
         numeric_cols = ['cases', 'deaths']
 
@@ -2866,6 +2873,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
