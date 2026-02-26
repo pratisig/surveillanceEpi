@@ -2462,6 +2462,13 @@ with tab4:
         df_agg = df_cases.groupby('health_area', as_index=False).agg({'cases': 'sum', 'deaths': 'sum'})
         df_corr = df_agg.copy()
         
+        # ✅ CORRECTION 1 : Agrégation de base TOUJOURS disponible
+        df_agg = df_cases.groupby('health_area', as_index=False).agg({'cases': 'sum', 'deaths': 'sum'})
+        df_corr = df_agg.copy()
+        
+        # ✅ Initialisation de numeric_cols AVANT toute utilisation
+        numeric_cols = ['cases', 'deaths']
+
         # ✅ NOUVEAU : Ajouter population à df_corr
         if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None \
                 and not st.session_state.dfpopulation.empty:
@@ -2925,6 +2932,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
