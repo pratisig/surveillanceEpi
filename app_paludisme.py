@@ -971,7 +971,6 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
             type=["shp", "geojson", "zip"],
             help="Format : Shapefile ou GeoJSON avec colonnes 'iso3' et 'health_area'"
         )
-
     # ── Chargement GDF ────────────────────────────────────────
     if st.session_state.gdf_health is not None:
         st.sidebar.success(f"✅ {len(st.session_state.gdf_health)} aires chargées (cache)")
@@ -997,7 +996,6 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                         for c in gdf_full.columns
                     ]
 
-                    # Détecter colonne ISO3
                     iso3_col = None
                     for col in ["iso3", "iso_3", "isocode", "country_iso", "pays_iso3", "countryiso"]:
                         if col in gdf_full.columns:
@@ -1014,7 +1012,6 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                         st.warning("⚠️ Colonne ISO3 non trouvée, toutes les aires chargées")
                         gdf = gdf_full.copy()
 
-                    # Mapping colonne health_area (même logique rougeole)
                     name_col = None
                     for col in ["health_area", "healtharea", "namefr", "name", "nom", "aire_sante", "airesante"]:
                         if col in gdf.columns:
@@ -1068,34 +1065,31 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 except Exception as e:
                     st.error(f"❌ Erreur lecture : {str(e)}")
 
-           if st.session_state.gdf_health is not None and st.session_state.get("dfpopulation") is None:
-            with st.spinner("📥 Chargement population WorldPop..."):
-                dfpopulation = worldpop_malaria_stats(st.session_state.gdf_health, use_gee)
-                if not dfpopulation.empty:
-                    merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
-                                  if c in dfpopulation.columns]
-                    gdf = st.session_state.gdf_health.merge(dfpopulation[merge_cols], on='health_area', how='left')
-                    if 'Pop_Totale' in gdf.columns:
-                        gdf_proj = gdf.to_crs('ESRI:54009')
-                        gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
-                        gdf['Densite_Pop'] = (gdf['Pop_Totale'] / gdf['Superficie_km2'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
-                    else:
-                        gdf['Densite_Pop'] = np.nan
-                    st.session_state.gdf_health = gdf
-                    st.session_state.dfpopulation = dfpopulation
-                    st.sidebar.success(f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants")
+    # ── WorldPop ──────────────────────────────────────────────
+    if st.session_state.gdf_health is not None and st.session_state.get("dfpopulation") is None:
+        with st.spinner("📥 Chargement population WorldPop..."):
+            dfpopulation = worldpop_malaria_stats(st.session_state.gdf_health, use_gee)
+            if not dfpopulation.empty:
+                merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
+                              if c in dfpopulation.columns]
+                gdf = st.session_state.gdf_health.merge(dfpopulation[merge_cols], on='health_area', how='left')
+                if 'Pop_Totale' in gdf.columns:
+                    gdf_proj = gdf.to_crs('ESRI:54009')
+                    gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
+                    gdf['Densite_Pop'] = (gdf['Pop_Totale'] / gdf['Superficie_km2'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
                 else:
-                    st.warning("⚠️ WorldPop non disponible (DataFrame vide ou que des NaN)")
-                    if dfpopulation.empty:
-                        st.error("❌ DataFrame complètement vide")
-                    else:
-                        st.warning("⚠️ Toutes les valeurs sont NaN (vérifier GEE)")
+                    gdf['Densite_Pop'] = np.nan
+                st.session_state.gdf_health = gdf
+                st.session_state.dfpopulation = dfpopulation
+                st.sidebar.success(f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants")
+            else:
+                st.sidebar.warning("⚠️ WorldPop non disponible (données vides ou NaN)")
 
-        if 'dfpopulation' in st.session_state and not st.session_state.dfpopulation.empty:
-            dfpop = st.session_state.dfpopulation
-            col1, col2 = st.sidebar.columns(2)
-            col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
-            col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
+    if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
+        dfpop = st.session_state.dfpopulation
+        col1, col2 = st.sidebar.columns(2)
+        col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
+        col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
 
 
     # ── Cas hebdomadaires (CSV) ───────────────────────────────
@@ -2869,6 +2863,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
