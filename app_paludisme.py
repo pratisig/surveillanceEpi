@@ -1083,16 +1083,22 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     st.info(f"📊 Colonnes : {list(dfpopulation.columns)}")
                     st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
                 if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
-                    gdf = gdf.merge(
-                        dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']],
-                        on='health_area',
-                        how='left'
-                    )
+                   merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14'] if c in dfpopulation.columns]
+                   gdf = gdf.merge(dfpopulation[merge_cols], on='health_area', how='left')
                
-                    st.session_state.gdf_health = gdf
-                    st.session_state.dfpopulation = dfpopulation
-                    total_pop = dfpopulation['Pop_Totale'].sum()
-                    st.success(f"✅ Population : {int(total_pop):,} habitants")
+                   # Calcul Densite_Pop après merge (elle n'existe pas dans dfpopulation)
+                   if 'Pop_Totale' in gdf.columns:
+                       gdf_proj = gdf.to_crs('ESRI:54009')
+                       gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
+                       gdf['Densite_Pop'] = (gdf['Pop_Totale'] / gdf['Superficie_km2'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+                   else:
+                       gdf['Densite_Pop'] = np.nan
+               
+                   st.session_state.gdf_health = gdf
+                   st.session_state.dfpopulation = dfpopulation
+                   total_pop = dfpopulation['Pop_Totale'].sum()
+                   st.success(f"✅ Population : {int(total_pop):,} habitants")
+
                 else:
                     st.warning("⚠️ WorldPop non disponible (DataFrame vide ou que des NaN)")
                     if dfpopulation.empty:
@@ -1706,10 +1712,19 @@ with tab2:
         
         # ✅ MERGER POPULATION dans gdf_map
         if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None:
-            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
-            gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
-            pop_count = gdf_map['Pop_Totale'].notna().sum()
-            st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
+             pop_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
+                         if c in st.session_state.dfpopulation.columns or c == 'health_area']
+             # Densite_Pop vient de gdf_health (calculée après merge WorldPop), pas de dfpopulation
+             gdf_source = st.session_state.gdf_health if 'Densite_Pop' in st.session_state.gdf_health.columns else None
+             pop_cols_dispo = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14'] if c in st.session_state.dfpopulation.columns]
+             df_pop = st.session_state.dfpopulation[pop_cols_dispo].copy()
+             # Ajouter Densite_Pop depuis gdf_health si disponible
+             if gdf_source is not None and 'Densite_Pop' in gdf_source.columns:
+                 df_pop = df_pop.merge(gdf_source[['health_area', 'Densite_Pop']], on='health_area', how='left')
+             gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
+             pop_count = gdf_map['Pop_Totale'].notna().sum()
+             st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
+
         
         # Ajouter moyennes climatiques
         if st.session_state.df_climate_aggregated is not None:
@@ -2851,6 +2866,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
