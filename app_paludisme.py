@@ -1351,8 +1351,8 @@ with tab1:
                 if area_selected:
                     df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
             
-                total_pop = df_pop["Pop_Totale"].sum()
-                enfants_0_14 = df_pop.get("Pop_Enfants_0_14", pd.Series([0]*len(df_pop))).sum()
+                total_pop = df_pop['Pop_Totale'].sum() if 'Pop_Totale' in df_pop.columns else 0
+                enfants_0_14 = df_pop['Pop_Enfants_0_14'].sum() if 'Pop_Enfants_0_14' in df_pop.columns else 0
             
                 st.markdown("---")
                 st.subheader("👥 Pyramide des âges")
@@ -2395,20 +2395,23 @@ with tab4:
         df_corr = df_agg.copy()
         
         # ✅ NOUVEAU : Ajouter population à df_corr
-        if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
-             pop_cols_dispo = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
-                               if c in st.session_state.dfpopulation.columns]
-             df_pop = st.session_state.dfpopulation[pop_cols_dispo].copy()
-             # Ajouter Densite_Pop depuis gdf_health si calculée
-             if 'Densite_Pop' in st.session_state.gdf_health.columns:
-                 df_pop = df_pop.merge(
-                     st.session_state.gdf_health[['health_area', 'Densite_Pop']],
-                     on='health_area', how='left'
-                 )
-             df_corr = df_corr.merge(df_pop, on='health_area', how='left')
-             st.info("Données population mergées dans l'analyse")
-
-        
+        if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None \
+                and not st.session_state.dfpopulation.empty:
+            pop_cols_dispo = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
+                              if c in st.session_state.dfpopulation.columns]
+            if len(pop_cols_dispo) > 1:  # Au moins health_area + 1 colonne pop
+                df_pop = st.session_state.dfpopulation[pop_cols_dispo].copy()
+                if 'Densite_Pop' in st.session_state.gdf_health.columns:
+                    df_pop = df_pop.merge(
+                        st.session_state.gdf_health[['health_area', 'Densite_Pop']],
+                        on='health_area', how='left'
+                    )
+                df_corr = df_corr.merge(df_pop, on='health_area', how='left')
+                # Ajouter colonnes pop aux numeric_cols seulement si présentes
+                for c in ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']:
+                    if c in df_corr.columns:
+                        numeric_cols.append(c)
+                st.info("✅ Données population mergées dans l'analyse")
         numeric_cols = ['cases', 'deaths']
 
         
@@ -2854,6 +2857,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
