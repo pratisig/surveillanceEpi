@@ -1265,6 +1265,11 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
                     with st.spinner(f"⏳ Téléchargement depuis {api_choice}..."):
                         gdf_health = st.session_state.gdf_health
                         df_cases = st.session_state.df_cases
+                        if gdf_health is not None:
+                            for col in ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']:
+                                if col not in gdf_health.columns:
+                                    gdf_health[col] = np.nan
+                            st.session_state.gdf_health = gdf_health
                         bounds = gdf_health.total_bounds
                         st.info(f"📍 Zone : [{bounds[1]:.2f}°W à {bounds[3]:.2f}°E, {bounds[0]:.2f}°S à {bounds[2]:.2f}°N]")
                         df_climate_agg = aggregate_climate_by_week_and_area(
@@ -2899,6 +2904,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
