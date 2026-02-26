@@ -918,7 +918,7 @@ st.sidebar.header("📁 Chargement des Données")
 with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
     source_geo = st.radio(
-        "Source géographique",
+        "Source des Aires de Santé",
         ["Charger un fichier (GeoJSON/SHP/ZIP)", "Fichier local (ao_hlthArea.zip)"],
         key="source_geo_palu"
     )
@@ -926,7 +926,8 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
     if st.session_state.gdf_health is not None:
         st.success(f"✅ {len(st.session_state.gdf_health)} aires chargées (cache)")
     else:
-        # ── Option 1 : Upload utilisateur ──
+
+        # ── Option 1 : Upload utilisateur ─────────────────────
         if source_geo == "Charger un fichier (GeoJSON/SHP/ZIP)":
             health_file = st.file_uploader(
                 "Aires de santé (GeoJSON/SHP/ZIP)",
@@ -934,59 +935,65 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 key="health_upload"
             )
             if health_file:
-                if health_file.name.endswith(".zip"):
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        zip_path_up = os.path.join(tmpdir, "upload.zip")
-                        with open(zip_path_up, "wb") as f:
-                            f.write(health_file.getvalue())
-                        with zipfile.ZipFile(zip_path_up, "r") as z:
-                            z.extractall(tmpdir)
-                        shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                        if shp_files:
+                import tempfile, zipfile
+                try:
+                    if health_file.name.endswith(".zip"):
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            zip_path_up = os.path.join(tmpdir, "upload.zip")
+                            with open(zip_path_up, "wb") as f:
+                                f.write(health_file.getvalue())
+                            with zipfile.ZipFile(zip_path_up, "r") as z:
+                                z.extractall(tmpdir)
+                            shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                            if not shp_files:
+                                raise ValueError("Aucun .shp dans le ZIP")
                             gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
-                        else:
-                            st.error("❌ Aucun .shp dans le ZIP")
-                            st.stop()
-                else:
-                    gdf = gpd.read_file(health_file)
+                    else:
+                        gdf = gpd.read_file(health_file)
 
-                gdf = ensure_wgs84(gdf)
-                if "health_area" not in gdf.columns:
-                    st.error("❌ Colonne 'health_area' absente")
-                    st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
-                    st.stop()
-                gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                st.session_state.gdf_health = gdf
-                st.success(f"✅ {len(gdf)} aires chargées")
+                    gdf = ensure_wgs84(gdf)
+                    if "health_area" not in gdf.columns:
+                        st.error("❌ Colonne 'health_area' absente")
+                        st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
+                    else:
+                        gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                        st.session_state.gdf_health = gdf
+                        st.success(f"✅ {len(gdf)} aires chargées")
 
-        # ── Option 2 : Fichier local ──
+                except Exception as e:
+                    st.error(f"❌ Erreur lecture fichier : {str(e)}")
+
+        # ── Option 2 : Fichier local ───────────────────────────
         else:
+            import tempfile, zipfile
             zip_path = os.path.join("data", "ao_hlthArea.zip")
             if not os.path.exists(zip_path):
-                st.error(f"❌ Fichier non trouvé : {zip_path}")
-                st.info("📁 Placez 'ao_hlthArea.zip' dans le dossier 'data/'")
-                st.stop()
-            try:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    with zipfile.ZipFile(zip_path, "r") as z:
-                        z.extractall(tmpdir)
-                    shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                    if not shp_files:
-                        raise ValueError("Aucun fichier .shp dans le ZIP")
-                    gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
+                st.warning("⚠️ Fichier 'data/ao_hlthArea.zip' non trouvé")
+                st.info("📁 Placez le fichier dans le dossier 'data/' puis rechargez")
+            else:
+                try:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        with zipfile.ZipFile(zip_path, "r") as z:
+                            z.extractall(tmpdir)
+                        shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                        if not shp_files:
+                            raise ValueError("Aucun fichier .shp dans le ZIP")
+                        gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
 
-                gdf = ensure_wgs84(gdf)
-                if "health_area" not in gdf.columns:
-                    st.error("❌ Colonne 'health_area' absente du fichier local")
-                    st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
-                    st.stop()
-                gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                st.session_state.gdf_health = gdf
-                st.sidebar.success(f"✅ {len(gdf)} aires chargées")
+                    gdf = ensure_wgs84(gdf)
+                    if "health_area" not in gdf.columns:
+                        st.error("❌ Colonne 'health_area' absente du fichier local")
+                        st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
+                    else:
+                        gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                        st.session_state.gdf_health = gdf
+                        st.success(f"✅ {len(gdf)} aires chargées")
 
-            except Exception as e:
-                st.error(f"❌ Erreur lecture fichier local : {str(e)}")
-                st.stop()
+                except Exception as e:
+                    st.error(f"❌ Erreur lecture fichier local : {str(e)}")
+
+    # ── WorldPop ──────────────────────────────────────────────
+
             
             # Téléchargement automatique WorldPop
             if 'dfpopulation' not in st.session_state:
@@ -2807,6 +2814,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
