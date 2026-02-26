@@ -1073,23 +1073,56 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
     if st.session_state.gdf_health is not None and st.session_state.get("dfpopulation") is None:
         with st.spinner("📥 Chargement population WorldPop..."):
             _cache_key = pays_selectionne if pays_selectionne else str(len(st.session_state.gdf_health))
-            dfpopulation = worldpop_malaria_stats(st.session_state.gdf_health, use_gee, cache_key=_cache_key)
+            dfpopulation = worldpop_malaria_stats(
+                st.session_state.gdf_health,
+                use_gee,
+                cache_key=_cache_key
+            )
+   
             if not dfpopulation.empty:
+   
+                # --- Sélection colonnes disponibles ---
                 merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
                               if c in dfpopulation.columns]
-                gdf = st.session_state.gdf_health.merge(dfpopulation[merge_cols], on='health_area', how='left')
+   
+                gdf = st.session_state.gdf_health.merge(
+                    dfpopulation[merge_cols],
+                    on='health_area',
+                    how='left'
+                )
+   
+                # --- Calcul densité si possible ---
                 if 'Pop_Totale' in gdf.columns:
-                    gdf_proj = gdf.to_crs('ESRI:54009')
-                    gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
-                    gdf['Densite_Pop'] = (gdf['Pop_Totale'] / gdf['Superficie_km2'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+                    try:
+                        gdf_proj = gdf.to_crs('ESRI:54009')
+                        gdf['Superficie_km2'] = gdf_proj.geometry.area / 1e6
+                        gdf['Densite_Pop'] = (
+                            gdf['Pop_Totale'] /
+                            gdf['Superficie_km2'].replace(0, np.nan)
+                        ).replace([np.inf, -np.inf], np.nan)
+                    except Exception:
+                        gdf['Densite_Pop'] = np.nan
                 else:
                     gdf['Densite_Pop'] = np.nan
+   
+                # ============================================================
+                # GARANTIE STRUCTURE POPULATION (ANTI-CRASH GLOBAL)
+                # ============================================================
+                for col in ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']:
+                    if col not in gdf.columns:
+                        gdf[col] = np.nan
+   
                 st.session_state.gdf_health = gdf
                 st.session_state.dfpopulation = dfpopulation
+   
+                # --- Sécurisation affichage ---
                 if 'Pop_Totale' in dfpopulation.columns:
-                    st.sidebar.success(f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants")
+                    st.sidebar.success(
+                        f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants"
+                    )
                 else:
                     st.sidebar.warning("⚠️ Colonne Pop_Totale absente dans dfpopulation")
+   
             else:
                 st.sidebar.warning("⚠️ WorldPop non disponible (données vides ou NaN)")
 
@@ -2866,6 +2899,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
