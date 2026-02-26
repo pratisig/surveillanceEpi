@@ -262,7 +262,8 @@ use_gee = gee_ok  # ✅ Utiliser le résultat de init_gee()
 # Fonction WorldPop UNIQUE
 # -------------------------
 @st.cache_data
-def worldpop_malaria_stats(_sa_gdf, use_gee, batch_size=20):
+def worldpop_malaria_stats(_sa_gdf, use_gee, cache_key="default", batch_size=20):
+
     """
     Récupère statistiques WorldPop par LOTS pour éviter le dépassement
     de la limite de 10 MB du payload GEE.
@@ -1068,7 +1069,8 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
     # ── WorldPop ──────────────────────────────────────────────
     if st.session_state.gdf_health is not None and st.session_state.get("dfpopulation") is None:
         with st.spinner("📥 Chargement population WorldPop..."):
-            dfpopulation = worldpop_malaria_stats(st.session_state.gdf_health, use_gee)
+            _cache_key = pays_selectionne if pays_selectionne else str(len(st.session_state.gdf_health))
+            dfpopulation = worldpop_malaria_stats(st.session_state.gdf_health, use_gee, cache_key=_cache_key)
             if not dfpopulation.empty:
                 merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
                               if c in dfpopulation.columns]
@@ -2845,6 +2847,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
