@@ -1188,11 +1188,12 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             - ✅ Données depuis 1940
             - ⚡ Très rapide (~30 sec)
             """)
-                if st.session_state.gdf_health is None:
+
+        if st.session_state.gdf_health is None:
             st.warning("⚠️ Chargez d'abord les aires de santé")
         else:
             if st.session_state.df_cases is None:
-                st.info("ℹ️ Les aires de santé sont prêtes. Chargez un fichier de cas (CSV) pour associer le climat aux semaines.")
+                st.info("ℹ️ Aires prêtes. Chargez un CSV de cas pour associer le climat aux semaines.")
             year_input = st.number_input(
                 "📅 Année des données",
                 min_value=2020, max_value=2025, value=2024,
@@ -1215,7 +1216,6 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
                     st.rerun()
             else:
                 st.info("ℹ️ Aucune donnée climat chargée")
-            # Le bouton téléchargement nécessite les cas pour les semaines
             if st.session_state.df_cases is not None:
                 if st.button("🚀 Télécharger Données Climatiques", key="download_climate", type="primary"):
                     with st.spinner(f"⏳ Téléchargement depuis {api_choice}..."):
@@ -1232,26 +1232,8 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
                         else:
                             st.error("❌ Aucune donnée climatique récupérée")
             else:
-                st.button("🚀 Télécharger Données Climatiques", disabled=True, 
+                st.button("🚀 Télécharger Données Climatiques", disabled=True,
                           key="download_climate", help="Chargez d'abord le CSV des cas")
-
-
-
-with st.sidebar.expander("🌍 Données Environnementales", expanded=False):
-    flood_file = st.file_uploader("🌊 Raster inondation (TIF)", type=["tif"], key="flood")
-    if flood_file:
-        st.session_state.flood_raster = rasterio.open(flood_file)
-        st.success("✅ Inondation chargée")
-    elev_file = st.file_uploader("⛰️ Raster élévation (TIF)", type=["tif"], key="elevation")
-    if elev_file:
-        st.session_state.elevation_raster = rasterio.open(elev_file)
-        st.success("✅ Élévation chargée")
-    river_file = st.file_uploader("🏞️ Rivières (GeoJSON/SHP/ZIP)", type=["geojson","shp","zip"], key="rivers")
-    if river_file:
-        rivers_gdf = gpd.read_file(river_file)
-        rivers_gdf = ensure_wgs84(rivers_gdf)
-        st.session_state.rivers_gdf = rivers_gdf
-        st.success(f"✅ {len(rivers_gdf)} cours d'eau")
 
 
 # ============================================================
@@ -2863,6 +2845,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
