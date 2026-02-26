@@ -1078,19 +1078,19 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 use_gee,
                 cache_key=_cache_key
             )
-   
+
             if not dfpopulation.empty:
-   
+
                 # --- Sélection colonnes disponibles ---
                 merge_cols = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
                               if c in dfpopulation.columns]
-   
+
                 gdf = st.session_state.gdf_health.merge(
                     dfpopulation[merge_cols],
                     on='health_area',
                     how='left'
                 )
-   
+
                 # --- Calcul densité si possible ---
                 if 'Pop_Totale' in gdf.columns:
                     try:
@@ -1104,32 +1104,41 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                         gdf['Densite_Pop'] = np.nan
                 else:
                     gdf['Densite_Pop'] = np.nan
-   
+
                 # ============================================================
                 # GARANTIE STRUCTURE POPULATION (ANTI-CRASH GLOBAL)
                 # ============================================================
                 for col in ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']:
                     if col not in gdf.columns:
                         gdf[col] = np.nan
-   
+
                 st.session_state.gdf_health = gdf
                 st.session_state.dfpopulation = dfpopulation
-   
+
                 # --- Sécurisation affichage ---
-                if 'Pop_Totale' in dfpopulation.columns:
+                if 'Pop_Totale' in dfpopulation.columns and dfpopulation['Pop_Totale'].notna().any():
                     st.sidebar.success(
                         f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants"
                     )
                 else:
                     st.sidebar.warning("⚠️ Colonne Pop_Totale absente dans dfpopulation")
-   
+
             else:
                 st.sidebar.warning("⚠️ WorldPop non disponible (données vides ou NaN)")
+                # Garantir que gdf_health a les colonnes pop même vides
+                gdf = st.session_state.gdf_health.copy()
+                for col in ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']:
+                    if col not in gdf.columns:
+                        gdf[col] = np.nan
+                st.session_state.gdf_health = gdf
+                st.session_state.dfpopulation = pd.DataFrame(
+                    columns=['health_area', 'Pop_Totale', 'Pop_Enfants_0_14']
+                )
 
     if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
         dfpop = st.session_state.dfpopulation
         col1, col2 = st.sidebar.columns(2)
-        if 'Pop_Totale' in dfpop.columns:
+        if 'Pop_Totale' in dfpop.columns and dfpop['Pop_Totale'].notna().any():
             col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
             col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
         else:
@@ -2904,6 +2913,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
