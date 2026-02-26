@@ -1086,16 +1086,22 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                     gdf['Densite_Pop'] = np.nan
                 st.session_state.gdf_health = gdf
                 st.session_state.dfpopulation = dfpopulation
-                st.sidebar.success(f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants")
+                if 'Pop_Totale' in dfpopulation.columns:
+                    st.sidebar.success(f"✅ Population : {int(dfpopulation['Pop_Totale'].sum()):,} habitants")
+                else:
+                    st.sidebar.warning("⚠️ Colonne Pop_Totale absente dans dfpopulation")
             else:
                 st.sidebar.warning("⚠️ WorldPop non disponible (données vides ou NaN)")
 
     if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
         dfpop = st.session_state.dfpopulation
         col1, col2 = st.sidebar.columns(2)
-        col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
-        col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
-
+        if 'Pop_Totale' in dfpop.columns:
+            col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
+            col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
+        else:
+            col1.metric("👥 Pop.", "0")
+            col2.metric("📍 Aires", "0")
 
     # ── Cas hebdomadaires (CSV) ───────────────────────────────
     cases_file = st.file_uploader(
@@ -1306,7 +1312,10 @@ with tab1:
 
             colp1, colp2, colp3 = st.columns(3)
             with colp1:
-                st.metric("Population totale", f"{int(df_pop['Pop_Totale'].sum()):,}".replace(",", " "))
+                if 'Pop_Totale' in df_pop.columns:
+                    st.metric("Population totale", f"{int(df_pop['Pop_Totale'].sum()):,}".replace(",", " "))
+                else:
+                    st.metric("Population totale", "0")
             with colp2:
                 st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " "))
             with colp3:
@@ -2857,6 +2866,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
