@@ -1351,7 +1351,7 @@ with tab1:
             cfr = (total_deaths / total_cases * 100) if total_cases > 0 else 0
             st.metric("Létalité", f"{cfr:.1f}%")
          #🔵 NOUVEAU : KPI POPULATION
-        if "dfpopulation" in st.session_state and not st.session_state.dfpopulation.empty:
+        if "dfpopulation" in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
             df_pop = st.session_state.dfpopulation
             # si filtres zone appliqués
             if area_selected:
@@ -1359,15 +1359,18 @@ with tab1:
 
             colp1, colp2, colp3 = st.columns(3)
             with colp1:
-                if 'Pop_Totale' in df_pop.columns:
+                if 'Pop_Totale' in df_pop.columns and df_pop['Pop_Totale'].notna().any():
                     st.metric("Population totale", f"{int(df_pop['Pop_Totale'].sum()):,}".replace(",", " "))
                 else:
                     st.metric("Population totale", "0")
             with colp2:
-                st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " "))
+                if 'Pop_Enfants_0_14' in df_pop.columns and df_pop['Pop_Enfants_0_14'].notna().any():
+                    st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " "))
+                else:
+                    st.metric("Enfants 0–14 ans", "0")
             with colp3:
                 # Densite_Pop est dans gdf_health, pas dans dfpopulation
-                if 'Densite_Pop' in st.session_state.gdf_health.columns:
+                if 'Densite_Pop' in st.session_state.gdf_health.columns and st.session_state.gdf_health['Densite_Pop'].notna().any():
                     densite = st.session_state.gdf_health['Densite_Pop'].mean()
                 else:
                     densite = 0.0
@@ -1407,86 +1410,90 @@ with tab1:
                 if area_selected:
                     df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
             
-                total_pop = df_pop['Pop_Totale'].sum() if 'Pop_Totale' in df_pop.columns else 0
-                enfants_0_14 = df_pop['Pop_Enfants_0_14'].sum() if 'Pop_Enfants_0_14' in df_pop.columns else 0
+                total_pop = df_pop['Pop_Totale'].sum() if 'Pop_Totale' in df_pop.columns and df_pop['Pop_Totale'].notna().any() else 0
+                enfants_0_14 = df_pop['Pop_Enfants_0_14'].sum() if 'Pop_Enfants_0_14' in df_pop.columns and df_pop['Pop_Enfants_0_14'].notna().any() else 0
             
-                st.markdown("---")
-                st.subheader("👥 Pyramide des âges")
-            
-                # ✅ VÉRIFIER si données détaillées disponibles (CORRECTION NOMS)
-                detailed_ages = ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']
-                has_detailed = all(f"Pop_MALE_{age}" in df_pop.columns for age in detailed_ages[:3])  # ✅ MALE en majuscules
-            
-                if has_detailed:
-                    # Pyramide DÉTAILLÉE <35 ans
-                    pop_data = {}
-                    for group in detailed_ages:
-                        pop_data[group] = {
-                            'male': df_pop[f'Pop_MALE_{group}'].sum(),      # ✅ MALE en majuscules
-                            'female': df_pop[f'Pop_FEMALE_{group}'].sum()   # ✅ FEMALE en majuscules
-                        }
-                    
-                    fig_pyr = go.Figure()
-                    
-                    # Hommes
-                    fig_pyr.add_trace(go.Bar(
-                        y=[f"{int(g.split('_')[0])}-{int(g.split('_')[1])}" for g in detailed_ages],
-                        x=[-pop_data[g]['male'] for g in detailed_ages],
-                        name="Hommes", orientation="h", marker_color="#1f77b4", opacity=0.85,
-                        text=[f"{int(pop_data[g]['male']):,}" for g in detailed_ages], 
-                        textposition="inside", insidetextanchor="end"
-                    ))
-                    
-                    # Femmes  
-                    fig_pyr.add_trace(go.Bar(
-                        y=[f"{int(g.split('_')[0])}-{int(g.split('_')[1])}" for g in detailed_ages],
-                        x=[pop_data[g]['female'] for g in detailed_ages],
-                        name="Femmes", orientation="h", marker_color="#ff7f0e", opacity=0.85,
-                        text=[f"{int(pop_data[g]['female']):,}" for g in detailed_ages], 
-                        textposition="inside"
-                    ))
-                    
-                    total_under_35 = sum(pop_data[g]['male'] + pop_data[g]['female'] for g in detailed_ages)
-                    subtitle = f"Détaillée <35 ans | Total: {int(total_pop):,} | <35 ans: {int(total_under_35):,} ({total_under_35/total_pop*100:.1f}%)"
-                    
+                # Protection : ne pas afficher la pyramide si population = 0
+                if total_pop == 0:
+                    st.info("ℹ️ Données de population non disponibles pour la pyramide des âges.")
                 else:
-                    # Pyramide SIMPLIFIÉE (0-14 vs 15+)
-                    st.info("ℹ️ Données détaillées indisponibles - Vue simplifiée")
-                    
-                    adultes_15p = max(total_pop - enfants_0_14, 0)
-                    enfants_g, enfants_f = enfants_0_14 * 0.51, enfants_0_14 * 0.49
-                    adultes_g, adultes_f = adultes_15p * 0.48, adultes_15p * 0.52
-                    
-                    fig_pyr = go.Figure()
-                    fig_pyr.add_trace(go.Bar(
-                        y=["0-14 ans", "15+ ans"],
-                        x=[-enfants_g, -adultes_g], name="Hommes", orientation="h", 
-                        marker_color="#1f77b4", opacity=0.8,
-                        text=[f"{int(enfants_g):,}", f"{int(adultes_g):,}"],
-                        textposition="inside", insidetextanchor="end"
-                    ))
-                    fig_pyr.add_trace(go.Bar(
-                        y=["0-14 ans", "15+ ans"],
-                        x=[enfants_f, adultes_f], name="Femmes", orientation="h", 
-                        marker_color="#ff7f0e", opacity=0.8,
-                        text=[f"{int(enfants_f):,}", f"{int(adultes_f):,}"],
-                        textposition="inside"
-                    ))
-                    
-                    subtitle = f"Simplifiée | Total: {int(total_pop):,} | Enfants 0-14: {int(enfants_0_14):,} ({enfants_0_14/total_pop*100:.1f}%)"
-            
-                # Layout commun
-                fig_pyr.update_layout(
-                    barmode="relative",
-                    title={"text": f"Structure démographique (WorldPop 100m)<br><sub>{subtitle}</sub>", 
-                           "x": 0.5, "font": {"size": 16}},
-                    xaxis={"title": "Population", "tickformat": ",", "zeroline": True},
-                    yaxis={"title": "Âge"},
-                    height=500, 
-                    legend={"x": 0.02, "y": 1.02}
-                )
+                    st.markdown("---")
+                    st.subheader("👥 Pyramide des âges")
                 
-                st.plotly_chart(fig_pyr, use_container_width=True)
+                    # ✅ VÉRIFIER si données détaillées disponibles (CORRECTION NOMS)
+                    detailed_ages = ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']
+                    has_detailed = all(f"Pop_MALE_{age}" in df_pop.columns for age in detailed_ages[:3])
+                
+                    if has_detailed:
+                        # Pyramide DÉTAILLÉE <35 ans
+                        pop_data = {}
+                        for group in detailed_ages:
+                            pop_data[group] = {
+                                'male': df_pop[f'Pop_MALE_{group}'].sum(),
+                                'female': df_pop[f'Pop_FEMALE_{group}'].sum()
+                            }
+                        
+                        fig_pyr = go.Figure()
+                        
+                        # Hommes
+                        fig_pyr.add_trace(go.Bar(
+                            y=[f"{int(g.split('_')[0])}-{int(g.split('_')[1])}" for g in detailed_ages],
+                            x=[-pop_data[g]['male'] for g in detailed_ages],
+                            name="Hommes", orientation="h", marker_color="#1f77b4", opacity=0.85,
+                            text=[f"{int(pop_data[g]['male']):,}" for g in detailed_ages], 
+                            textposition="inside", insidetextanchor="end"
+                        ))
+                        
+                        # Femmes  
+                        fig_pyr.add_trace(go.Bar(
+                            y=[f"{int(g.split('_')[0])}-{int(g.split('_')[1])}" for g in detailed_ages],
+                            x=[pop_data[g]['female'] for g in detailed_ages],
+                            name="Femmes", orientation="h", marker_color="#ff7f0e", opacity=0.85,
+                            text=[f"{int(pop_data[g]['female']):,}" for g in detailed_ages], 
+                            textposition="inside"
+                        ))
+                        
+                        total_under_35 = sum(pop_data[g]['male'] + pop_data[g]['female'] for g in detailed_ages)
+                        subtitle = f"Détaillée <35 ans | Total: {int(total_pop):,} | <35 ans: {int(total_under_35):,} ({total_under_35/total_pop*100:.1f}%)"
+                        
+                    else:
+                        # Pyramide SIMPLIFIÉE (0-14 vs 15+)
+                        st.info("ℹ️ Données détaillées indisponibles - Vue simplifiée")
+                        
+                        adultes_15p = max(total_pop - enfants_0_14, 0)
+                        enfants_g, enfants_f = enfants_0_14 * 0.51, enfants_0_14 * 0.49
+                        adultes_g, adultes_f = adultes_15p * 0.48, adultes_15p * 0.52
+                        
+                        fig_pyr = go.Figure()
+                        fig_pyr.add_trace(go.Bar(
+                            y=["0-14 ans", "15+ ans"],
+                            x=[-enfants_g, -adultes_g], name="Hommes", orientation="h", 
+                            marker_color="#1f77b4", opacity=0.8,
+                            text=[f"{int(enfants_g):,}", f"{int(adultes_g):,}"],
+                            textposition="inside", insidetextanchor="end"
+                        ))
+                        fig_pyr.add_trace(go.Bar(
+                            y=["0-14 ans", "15+ ans"],
+                            x=[enfants_f, adultes_f], name="Femmes", orientation="h", 
+                            marker_color="#ff7f0e", opacity=0.8,
+                            text=[f"{int(enfants_f):,}", f"{int(adultes_f):,}"],
+                            textposition="inside"
+                        ))
+                        
+                        subtitle = f"Simplifiée | Total: {int(total_pop):,} | Enfants 0-14: {int(enfants_0_14):,} ({enfants_0_14/total_pop*100:.1f}%)"
+                
+                    # Layout commun
+                    fig_pyr.update_layout(
+                        barmode="relative",
+                        title={"text": f"Structure démographique (WorldPop 100m)<br><sub>{subtitle}</sub>", 
+                               "x": 0.5, "font": {"size": 16}},
+                        xaxis={"title": "Population", "tickformat": ",", "zeroline": True},
+                        yaxis={"title": "Âge"},
+                        height=500, 
+                        legend={"x": 0.02, "y": 1.02}
+                    )
+                    
+                    st.plotly_chart(fig_pyr, use_container_width=True)
 
 
             # CORRECTION: Graphiques séparés
@@ -2913,6 +2920,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
