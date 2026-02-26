@@ -1185,13 +1185,34 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         if df is not None:
             df.columns = (df.columns.str.strip().str.lower()
                          .str.replace(' ', '_').str.replace('-', '_'))
+
+            week_aliases = ['week_', 'week', 'semaine', 'sem', 's', 'wk',
+                            's_epi', 'semaine_epi', 'semaineepid', 'epiweek',
+                            'epi_week', 'weeknum', 'week_num']
+            for alias in week_aliases:
+                if alias in df.columns and alias != 'week_':
+                    df = df.rename(columns={alias: 'week_'})
+                    st.info(f"ℹ️ Colonne '{alias}' renommée en 'week_'")
+                    break
+
+            # NORMALISATION FLEXIBLE DE LA COLONNE AIRE → health_area
+            area_aliases = ['health_area', 'healtharea', 'aire_sante', 'airesante',
+                            'aire', 'zone', 'district', 'name', 'nom', 'namefr']
+            for alias in area_aliases:
+                if alias in df.columns and alias != 'health_area':
+                    df = df.rename(columns={alias: 'health_area'})
+                    st.info(f"ℹ️ Colonne '{alias}' renommée en 'health_area'")
+                    break
+
             required = {"health_area", "week_", "cases"}
             if required.issubset(set(df.columns)):
                 st.success("✅ Toutes les colonnes requises sont présentes")
                 df["health_area"] = df["health_area"].astype(str).str.strip().str.lower()
+
                 if "deaths" not in df.columns:
                     df["deaths"] = 0
                     st.info("ℹ️ Colonne 'deaths' ajoutée avec valeur 0")
+
                 df["week_"] = normalize_week_format(df["week_"])
                 df["cases"] = pd.to_numeric(df["cases"], errors='coerce').fillna(0).astype(int)
                 df["deaths"] = pd.to_numeric(df["deaths"], errors='coerce').fillna(0).astype(int)
@@ -1199,17 +1220,42 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 df = df[(df["cases"] >= 0) & (df["week_"] > 0)]
                 st.session_state.df_cases = df
                 st.success(f"✅ {len(df)} enregistrements chargés")
+
+                # ── Diagnostic de correspondance avec gdf_health ─────────
+                if st.session_state.gdf_health is not None:
+                    gdf_areas = set(st.session_state.gdf_health["health_area"].unique())
+                    csv_areas = set(df["health_area"].unique())
+                    matched   = gdf_areas & csv_areas
+                    unmatched_csv = csv_areas - gdf_areas
+                    pct_match = len(matched) / max(len(csv_areas), 1) * 100
+
+                    if pct_match == 100:
+                        st.success(f"✅ Correspondance parfaite : {len(matched)} aires matchées")
+                    elif pct_match >= 50:
+                        st.warning(
+                            f"⚠️ Correspondance partielle : {len(matched)}/{len(csv_areas)} aires ({pct_match:.0f}%)\n\n"
+                            f"Non matchés CSV : {sorted(unmatched_csv)[:10]}\n\n"
+                            f"Exemples GDF    : {sorted(gdf_areas - matched)[:10]}"
+                        )
+                    else:
+                        st.error(
+                            f"❌ Correspondance insuffisante : {len(matched)}/{len(csv_areas)} ({pct_match:.0f}%)\n\n"
+                            f"Exemples CSV : {sorted(csv_areas)[:5]}\n\n"
+                            f"Exemples GDF : {sorted(gdf_areas)[:5]}\n\n"
+                            "Vérifiez que les noms d'aires dans le CSV correspondent à ceux du shapefile."
+                        )
+
                 with st.expander("👁️ Aperçu des 5 premières lignes"):
                     st.dataframe(df.head())
                 with st.expander("📊 Statistiques"):
                     col1, col2, col3 = st.columns(3)
-                    col1.metric("Total cas", int(df["cases"].sum()))
-                    col2.metric("Total décès", int(df["deaths"].sum()))
+                    col1.metric("Total cas",    int(df["cases"].sum()))
+                    col2.metric("Total décès",  int(df["deaths"].sum()))
                     col3.metric("Aires uniques", df["health_area"].nunique())
             else:
                 missing = required - set(df.columns)
                 st.error(f"❌ Colonnes manquantes : {missing}")
-                st.error(f"📋 Colonnes trouvées : {list(df.columns)}")
+                st.error(f"Colonnes trouvées : {list(df.columns)}")
 
 
 # === API CLIMAT ===
@@ -2932,6 +2978,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
