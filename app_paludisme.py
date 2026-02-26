@@ -1088,6 +1088,7 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                         on='health_area',
                         how='left'
                     )
+               
                     st.session_state.gdf_health = gdf
                     st.session_state.dfpopulation = dfpopulation
                     total_pop = dfpopulation['Pop_Totale'].sum()
@@ -2850,6 +2851,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
