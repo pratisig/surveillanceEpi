@@ -103,9 +103,13 @@ st.markdown("""
 # ============================================================
 for key in ["gdf_health", "df_cases", "temp_raster", "flood_raster", "rivers_gdf",
             "precipitation_raster", "humidity_raster", "elevation_raster", "model_results",
-            "df_climate_aggregated","enrichi_bfa", "enrichi_mli", "enrichi_ner", "enrichi_mrt", "enrichi_upload"]:
+            "df_climate_aggregated", "enrichi_bfa", "enrichi_mli", "enrichi_ner", "enrichi_mrt", "enrichi_upload"]:
     if key not in st.session_state:
         st.session_state[key] = None
+
+if "pays_precedent"  not in st.session_state: st.session_state["pays_precedent"]  = None
+if "sa_gdf_cache"    not in st.session_state: st.session_state["sa_gdf_cache"]    = None
+if "iso3pays_cache"  not in st.session_state: st.session_state["iso3pays_cache"]  = None
 
 if "pays_precedent" not in st.session_state: st.session_state["pays_precedent"] = None
 if "sa_gdf_cache"   not in st.session_state: st.session_state["sa_gdf_cache"]   = None
@@ -1031,8 +1035,9 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         iso3pays = PAYS_ISO3_MAP[pays_selectionne]
         st.session_state["iso3pays_courant"] = iso3pays
         if st.session_state["pays_precedent"] != pays_selectionne:
-            st.session_state["pays_precedent"] = pays_selectionne
-            st.session_state["sa_gdf_cache"]   = None
+            st.session_state["pays_precedent"]  = pays_selectionne
+            st.session_state["sa_gdf_cache"]    = None
+            st.session_state["iso3pays_cache"]  = None   # ← ajout
             for k in [f"enrichi_{v}" for v in PAYS_ISO3_MAP.values()]:
                 st.session_state[k] = None
     else:
@@ -1043,9 +1048,14 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         )
 
     # ── Chargement avec cache (pattern rougeole) ──────────────
-    if st.session_state["sa_gdf_cache"] is not None and source_geo == "Fichier local (ao_hlthArea.zip)":
+    _cache_valide = (
+        st.session_state["sa_gdf_cache"] is not None
+        and source_geo == "Fichier local (ao_hlthArea.zip)"
+        and st.session_state.get("iso3pays_cache") == iso3pays   # ← vérifie que le cache = bon pays
+    )
+    if _cache_valide:
         gdf_health = st.session_state["sa_gdf_cache"]
-        st.success(f"✅ {len(gdf_health)} aires chargées (cache)")
+        st.success(f"✅ {len(gdf_health)} aires chargées (cache - {iso3pays})")
     else:
         if source_geo == "Fichier local (ao_hlthArea.zip)":
             zip_path = os.path.join("data", "ao_hlthArea.zip")
@@ -1059,6 +1069,8 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 st.stop()
             st.sidebar.success(f"✅ {len(gdf_health)} aires chargées ({iso3pays})")
             st.session_state["sa_gdf_cache"] = gdf_health
+            st.session_state["sa_gdf_cache"] = gdf_health
+            st.session_state["iso3pays_cache"] = iso3pays 
         else:
             if upload_file is None:
                 st.warning("⚠️ Veuillez uploader un fichier")
