@@ -1336,14 +1336,25 @@ with tab1:
         st.markdown("""
         <style>
         [data-testid="stMetric"] {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px;
-            padding: 16px 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            background-color: rgba(255, 255, 255, 0.72);
+            border: 1px solid rgba(232, 0, 28, 0.18);
+            border-left: 3px solid #E8001C;
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
         }
-        [data-testid="stMetricLabel"] { color: #a0aec0 !important; font-size: 0.85rem !important; }
-        [data-testid="stMetricValue"] { color: #ffffff !important; font-size: 1.6rem !important; font-weight: 700 !important; }
+        [data-testid="stMetricLabel"] {
+            color: #555555 !important;
+            font-size: 0.80rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        [data-testid="stMetricValue"] {
+            color: #1a1a1a !important;
+            font-size: 1.35rem !important;
+            font-weight: 700 !important;
+        }
+        [data-testid="stMetricDelta"] { font-size: 0.78rem !important; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -1474,32 +1485,38 @@ with tab1:
                 st.plotly_chart(fig_pyr, use_container_width=True) 
        # Section climat
         if st.session_state.df_climate_aggregated is not None:
-            st.markdown("---")
-            st.subheader("🌡️ Indicateurs Climatiques")
-            
-            df_clim = st.session_state.df_climate_aggregated.copy()
-            
-            if week_selected:
-                df_clim = df_clim[df_clim["week_"].isin(week_selected)]
-            if area_selected:
-                df_clim = df_clim[df_clim["health_area"].isin(area_selected)]
-            
+            st.markdown("""
+            <style>
+            div[data-testid="stMetric"].clim-card {
+                background: rgba(219, 234, 254, 0.80) !important;
+                border: 1px solid rgba(59, 130, 246, 0.25) !important;
+                border-left: 3px solid #3B82F6 !important;
+                border-radius: 8px;
+                padding: 8px 14px !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
             col1, col2, col3, col4 = st.columns(4)
-            
             with col1:
                 if 'temp_api' in df_clim.columns:
-                    st.metric("🌡️ Temp. Moy.", f"{df_clim['temp_api'].mean():.1f}°C")
-            
+                    st.markdown('<div class="clim-card">', unsafe_allow_html=True)
+                    st.metric("🌡️ Temp. moy.", f"{df_clim['temp_api'].mean():.1f} °C")
+                    st.markdown('</div>', unsafe_allow_html=True)
             with col2:
                 if 'precip_api' in df_clim.columns:
-                    st.metric("🌧️ Précip. Total", f"{df_clim['precip_api'].sum():.1f}mm")
-            
+                    st.markdown('<div class="clim-card">', unsafe_allow_html=True)
+                    st.metric("🌧️ Précip. tot.", f"{df_clim['precip_api'].sum():.1f} mm")
+                    st.markdown('</div>', unsafe_allow_html=True)
             with col3:
                 if 'humidity_api' in df_clim.columns:
-                    st.metric("💧 Humid. Moy.", f"{df_clim['humidity_api'].mean():.1f}%")
-            
+                    st.markdown('<div class="clim-card">', unsafe_allow_html=True)
+                    st.metric("💧 Humid. moy.", f"{df_clim['humidity_api'].mean():.1f} %")
+                    st.markdown('</div>', unsafe_allow_html=True)
             with col4:
-                st.metric("📅 Semaines Climat", df_clim['week_'].nunique())
+                st.markdown('<div class="clim-card">', unsafe_allow_html=True)
+                st.metric("📅 Semaines", df_clim['week_'].nunique())
+                st.markdown('</div>', unsafe_allow_html=True)
 
 
             # CORRECTION: Graphiques séparés
@@ -1678,7 +1695,7 @@ with tab2:
                 )
             
             with col3:
-                st.metric("📊 Enregistrements", len(df_climate[df_climate['week_'] == selected_week_climate]))
+                pass  
             
             df_week_climate = df_climate[df_climate['week_'] == selected_week_climate]
             
@@ -1733,10 +1750,11 @@ with tab2:
                     
                     values = gdf_climate[climate_var].dropna()
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Min", f"{values.min():.2f}")
-                    col2.metric("Moy", f"{values.mean():.2f}")
-                    col3.metric("Max", f"{values.max():.2f}")
-                    col4.metric("Écart-type", f"{values.std():.2f}")
+                    col1.metric("Min",       f"{values.min():.2f}")
+                    col2.metric("Moy",       f"{values.mean():.2f}")
+                    col3.metric("Max",       f"{values.max():.2f}")
+                    col4.metric("Écart-type",f"{values.std():.2f}")
+                    st.caption(f"📊 {len(df_week_climate)} enregistrements · Semaine {selected_week_climate} · {var_labels.get(climate_var, climate_var)}")
             
             st.markdown("---")
         
@@ -1895,23 +1913,66 @@ with tab2:
         
         for idx, row in gdf_map.iterrows():
             # Construction du HTML popup
+            # Calcul taux d'attaque pour ce popup
+            _cases_row   = safe_int(row['cases'])
+            _pop_row     = safe_float(row.get('Pop_Totale', 0))
+            _enfants_row = safe_float(row.get('Pop_Enfants_0_14', 0))
+            _ta_total    = (_cases_row / _pop_row * 10000)    if _pop_row > 0    else None
+            _ta_enfants  = (_cases_row / _enfants_row * 10000) if _enfants_row > 0 else None
+
             popup_html = f"""
-            <div style="width:340px; font-family:Arial; font-size:12px;">
-                <h4 style="color:#2E86AB; margin:0;">{row['health_area']}</h4>
-                <hr style="margin:5px 0;">
-                <table style="width:100%;">
-                    <tr><td><b>📊 Cas:</b></td><td>{safe_int(row['cases'])}</td></tr>
-                    <tr><td><b>💀 Décès:</b></td><td>{safe_int(row['deaths'])}</td></tr>
+            <div style="width:360px; font-family:Arial; font-size:12px;">
+                <h4 style="color:#2E86AB; margin:0; text-transform:capitalize;">
+                    {row['health_area']}
+                </h4>
+                <hr style="margin:5px 0; border-color:#2E86AB;">
+
+                <p style="margin:4px 0; font-weight:700; color:#555;">📊 Épidémiologie</p>
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr style="background:#FFF3E0;">
+                        <td style="padding:3px 6px;"><b>🦟 Cas</b></td>
+                        <td style="padding:3px 6px; text-align:right;">{_cases_row:,}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 6px;"><b>💀 Décès</b></td>
+                        <td style="padding:3px 6px; text-align:right;">{safe_int(row['deaths']):,}</td>
+                    </tr>
             """
-            
-            # Population (si disponible)
+            if _ta_total is not None:
+                popup_html += f"""
+                    <tr style="background:#FCE4EC;">
+                        <td style="padding:3px 6px;"><b>📈 TA (p.10 000 hab)</b></td>
+                        <td style="padding:3px 6px; text-align:right; font-weight:700; color:#c62828;">{_ta_total:.1f}</td>
+                    </tr>"""
+            if _ta_enfants is not None:
+                popup_html += f"""
+                    <tr style="background:#F3E5F5;">
+                        <td style="padding:3px 6px;"><b>👶 TA enfants (p.10 000)</b></td>
+                        <td style="padding:3px 6px; text-align:right; font-weight:700; color:#6a1b9a;">{_ta_enfants:.1f}</td>
+                    </tr>"""
+
+            # Bloc population
+            if 'Pop_Totale' in gdf_map.columns or 'Pop_Enfants_0_14' in gdf_map.columns:
+                popup_html += """<tr><td colspan="2" style="padding:6px 6px 2px;">
+                    <b style="color:#555;">👥 Démographie</b></td></tr>"""
             if 'Pop_Totale' in gdf_map.columns and pd.notna(row.get('Pop_Totale')):
-                popup_html += f"<tr style='background:#F3E5F5;'><td><b>👥 Population:</b></td><td>{int(row['Pop_Totale']):,}</td></tr>"
+                popup_html += f"""
+                    <tr style="background:#E8F5E9;">
+                        <td style="padding:3px 6px;">Population totale</td>
+                        <td style="padding:3px 6px; text-align:right;">{int(row['Pop_Totale']):,}</td>
+                    </tr>"""
             if 'Pop_Enfants_0_14' in gdf_map.columns and pd.notna(row.get('Pop_Enfants_0_14')):
-                popup_html += f"<tr style='background:#E8F5E9;'><td><b>👶 Enfants 0–14:</b></td><td>{int(row['Pop_Enfants_0_14']):,}</td></tr>"
+                popup_html += f"""
+                    <tr style="background:#E3F2FD;">
+                        <td style="padding:3px 6px;">Enfants 0–14 ans</td>
+                        <td style="padding:3px 6px; text-align:right;">{int(row['Pop_Enfants_0_14']):,}</td>
+                    </tr>"""
             if 'Densite_Pop' in gdf_map.columns and pd.notna(row.get('Densite_Pop')):
-                popup_html += f"<tr style='background:#FFF3E0;'><td><b>📏 Densité:</b></td><td>{safe_float(row['Densite_Pop']):.2f} hab/km²</td></tr>"
-            
+                popup_html += f"""
+                    <tr>
+                        <td style="padding:3px 6px;">Densité</td>
+                        <td style="padding:3px 6px; text-align:right;">{safe_float(row['Densite_Pop']):.1f} hab/km²</td>
+                    </tr>"""
             # Climat (si disponible)
             if 'temp_api' in gdf_map.columns and pd.notna(row.get('temp_api')):
                 popup_html += f"<tr style='background:#FFF3E0;'><td><b>🌡️ Température:</b></td><td>{safe_float(row['temp_api']):.1f}°C</td></tr>"
