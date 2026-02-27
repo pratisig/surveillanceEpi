@@ -1052,7 +1052,12 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
                     # Filtrer sur le pays choisi (iso3 uniquement parmi les 4 autorisés)
                     if "iso3" in gdf_all.columns:
-                        gdf = gdf_all[gdf_all["iso3"] == pays_choisi].copy()
+                        iso3_norm = gdf_all["iso3"].astype(str).str.strip().str.upper()
+                        gdf = gdf_all[iso3_norm == pays_choisi].copy()
+                        if len(gdf) == 0:
+                            valeurs_reelles = gdf_all["iso3"].unique().tolist()
+                            st.error(f"❌ Aucune aire trouvée pour '{pays_choisi}'")
+                            st.info(f"📋 Valeurs iso3 disponibles dans le fichier : {valeurs_reelles}")
                     else:
                         gdf = gdf_all.copy()
 
@@ -2853,6 +2858,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
