@@ -984,34 +984,38 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                         shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
                         if not shp_files:
                             raise ValueError("Aucun fichier .shp dans le ZIP")
-                        gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
+                        gdf_all = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
 
-                    # Normaliser les noms de colonnes
-                    gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_")
-                                   for c in gdf.columns]
+                    gdf_all = ensure_wgs84(gdf_all)
 
-                    # Chercher la colonne nom parmi toutes les variantes connues
-                    name_col = None
-                    for col in ["health_area", "health_are", "healtharea",
-                                "name_fr", "namefr", "name", "nom",
-                                "aire_sante", "airesante"]:
-                        if col in gdf.columns:
-                            name_col = col
-                            break
-
-                    if name_col:
-                        gdf["health_area"] = gdf[name_col]
-                        if name_col != "health_area":
-                            st.info(f"ℹ️ Colonne '{name_col}' utilisée comme 'health_area'")
+                    # Sélection du pays via iso3
+                    pays_disponibles = sorted(gdf_all["iso3"].dropna().unique().tolist()) if "iso3" in gdf_all.columns else []
+                    pays_labels = {"BFA": "🇧🇫 Burkina Faso", "MLI": "🇲🇱 Mali", "NER": "🇳🇪 Niger", "MRT": "🇲🇷 Mauritanie"}
+                    
+                    if pays_disponibles:
+                        pays_choisi = st.selectbox(
+                            "🌍 Sélectionner le pays",
+                            pays_disponibles,
+                            format_func=lambda x: pays_labels.get(x, x),
+                            key="pays_local_select"
+                        )
+                        gdf = gdf_all[gdf_all["iso3"] == pays_choisi].copy()
+                        st.info(f"📍 {pays_labels.get(pays_choisi, pays_choisi)} : {len(gdf)} aires de santé")
                     else:
+                        gdf = gdf_all.copy()
+
+                    # Normaliser la colonne nom
+                    _ha_col = next((c for c in ["health_area", "health_are", "name_fr", "namefr", "name", "nom"]
+                                    if c in gdf.columns), None)
+                    if _ha_col is None:
                         st.error("❌ Aucune colonne nom trouvée dans le shapefile local")
                         st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
-                        st.stop()
-
-                    gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                    gdf = ensure_wgs84(gdf)
-                    st.session_state.gdf_health = gdf
-                    st.success(f"✅ {len(gdf)} aires chargées")
+                    else:
+                        gdf["health_area"] = gdf[_ha_col].astype(str).str.strip().str.lower()
+                        if _ha_col != "health_area":
+                            st.info(f"ℹ️ Colonne '{_ha_col}' utilisée comme 'health_area'")
+                        st.session_state.gdf_health = gdf
+                        st.success(f"✅ {len(gdf)} aires chargées")
 
                 except Exception as e:
                     st.error(f"❌ Erreur lecture fichier local : {str(e)}")
@@ -2838,6 +2842,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
