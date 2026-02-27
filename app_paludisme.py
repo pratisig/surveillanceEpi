@@ -341,14 +341,25 @@ def worldpop_malaria_stats(_sa_gdf, use_gee):
                 "health_area":      props.get("health_area", ""),
                 "Pop_Totale":       int(pop_tot)   if pop_tot   else np.nan,
                 "Pop_Enfants_0_14": int(enfants_t) if enfants_t else np.nan,
+                # ── Hommes ──────────────────────────────────────────────
                 "Pop_MALE_0_4":     int(props.get("M_0", 0) + props.get("M_1", 0)),
                 "Pop_MALE_5_9":     int(props.get("M_5",  0)),
                 "Pop_MALE_10_14":   int(props.get("M_10", 0)),
+                "Pop_MALE_15_19":   int(props.get("M_15", 0)),   # ← AJOUTÉ
+                "Pop_MALE_20_24":   int(props.get("M_20", 0)),   # ← AJOUTÉ
+                "Pop_MALE_25_29":   int(props.get("M_25", 0)),   # ← AJOUTÉ
+                "Pop_MALE_30_34":   int(props.get("M_30", 0)),   # ← AJOUTÉ
+                # ── Femmes ──────────────────────────────────────────────
                 "Pop_FEMALE_0_4":   int(props.get("F_0", 0) + props.get("F_1", 0)),
                 "Pop_FEMALE_5_9":   int(props.get("F_5",  0)),
                 "Pop_FEMALE_10_14": int(props.get("F_10", 0)),
+                "Pop_FEMALE_15_19": int(props.get("F_15", 0)),   # ← AJOUTÉ
+                "Pop_FEMALE_20_24": int(props.get("F_20", 0)),   # ← AJOUTÉ
+                "Pop_FEMALE_25_29": int(props.get("F_25", 0)),   # ← AJOUTÉ
+                "Pop_FEMALE_30_34": int(props.get("F_30", 0)),   # ← AJOUTÉ
                 "Densite_Pop":      np.nan,
             })
+
             progress_bar.progress(min((i + 1) / total_aires, 1.0))
 
         progress_bar.empty()
@@ -1352,7 +1363,7 @@ with tab1:
             
                 # ✅ VÉRIFIER si données détaillées disponibles (CORRECTION NOMS)
                 detailed_ages = ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']
-                has_detailed = all(f"Pop_MALE_{age}" in df_pop.columns for age in detailed_ages[:3])  # ✅ MALE en majuscules
+                has_detailed = all(f"Pop_MALE_{age}" in df_pop.columns for age in detailed_ages)  # ✅ MALE en majuscules
             
                 if has_detailed:
                     # Pyramide DÉTAILLÉE <35 ans
@@ -2862,6 +2873,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
