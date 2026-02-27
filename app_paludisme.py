@@ -286,23 +286,28 @@ def worldpop_malaria_stats(_sa_gdf, use_gee):
         dataset      = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex")
         pop_img      = dataset.mosaic()
 
-        male_bands   = ["M_0", "M_1", "M_5", "M_10", "M_15", "M_20", "M_25", "M_30"]
-        female_bands = ["F_0", "F_1", "F_5", "F_10", "F_15", "F_20", "F_25", "F_30"]
+        male_bands_all   = ["M_0", "M_1", "M_5", "M_10", "M_15", "M_20", "M_25", "M_30"]
+        female_bands_all = ["F_0", "F_1", "F_5", "F_10", "F_15", "F_20", "F_25", "F_30"]
 
-        selected_males   = pop_img.select(male_bands)
-        selected_females = pop_img.select(female_bands)
-        total_pop        = pop_img.select("population")
+        # Bandes UNIQUEMENT pour 0–14 ans (M_0=0-1an, M_1=1-4ans, M_5=5-9ans, M_10=10-14ans)
+        male_bands_0_14   = ["M_0", "M_1", "M_5", "M_10"]
+        female_bands_0_14 = ["F_0", "F_1", "F_5", "F_10"]
 
-        males_sum   = selected_males.reduce(ee.Reducer.sum()).rename("garcons")
-        females_sum = selected_females.reduce(ee.Reducer.sum()).rename("filles")
-        enfants     = males_sum.add(females_sum).rename("enfants")
+        selected_males_all   = pop_img.select(male_bands_all)
+        selected_females_all = pop_img.select(female_bands_all)
+        selected_males_0_14   = pop_img.select(male_bands_0_14)
+        selected_females_0_14 = pop_img.select(female_bands_0_14)
+        total_pop             = pop_img.select("population")
+
+        # Calcul correct enfants 0–14 ans uniquement
+        males_0_14_sum   = selected_males_0_14.reduce(ee.Reducer.sum()).rename("garcons_0_14")
+        females_0_14_sum = selected_females_0_14.reduce(ee.Reducer.sum()).rename("filles_0_14")
+        enfants_0_14     = males_0_14_sum.add(females_0_14_sum).rename("enfants_0_14")
 
         final_mosaic = (total_pop
-                        .addBands(selected_males)
-                        .addBands(selected_females)
-                        .addBands(males_sum)
-                        .addBands(females_sum)
-                        .addBands(enfants))
+                        .addBands(selected_males_all)
+                        .addBands(selected_females_all)
+                        .addBands(enfants_0_14))
 
         pixel_area         = ee.Image.pixelArea().divide(10000)
         final_mosaic_count = final_mosaic.multiply(pixel_area)
@@ -340,7 +345,7 @@ def worldpop_malaria_stats(_sa_gdf, use_gee):
         for i, feat in enumerate(stats_info["features"]):
             props     = feat["properties"]
             pop_tot   = props.get("population", 0)
-            enfants_t = props.get("enfants",    0)
+            enfants_t = props.get("enfants_0_14",    0)
             data_list.append({
                 "health_area":      props.get("health_area", ""),
                 "Pop_Totale":       int(pop_tot)   if pop_tot   else np.nan,
@@ -1327,42 +1332,57 @@ with tab1:
         if area_selected:
             df_w = df_w[df_w["health_area"].isin(area_selected)]
 
-        st.subheader("📊 Indicateurs Clés")
+        st.markdown("### 📊 Indicateurs Clés")
+        st.markdown("""
+        <style>
+        [data-testid="stMetric"] {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        [data-testid="stMetricLabel"] { color: #a0aec0 !important; font-size: 0.85rem !important; }
+        [data-testid="stMetricValue"] { color: #ffffff !important; font-size: 1.6rem !important; font-weight: 700 !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
         col1, col2, col3, col4, col5 = st.columns(5)
-        
         with col1:
             total_cases = safe_int(df_w["cases"].sum())
-            st.metric("Cas Totaux", f"{total_cases:,}")
-        
+            st.metric("🦟 Cas Totaux", f"{total_cases:,}")
         with col2:
             total_deaths = safe_int(df_w["deaths"].sum())
-            st.metric("Décès", f"{total_deaths:,}")
-        
+            st.metric("💀 Décès", f"{total_deaths:,}")
         with col3:
-            st.metric("Aires", df_w["health_area"].nunique())
-        
+            st.metric("🏥 Aires", df_w["health_area"].nunique())
         with col4:
-            st.metric("Semaines", df_cases["week_"].nunique())
-        
+            st.metric("📅 Semaines", df_cases["week_"].nunique())
         with col5:
             cfr = (total_deaths / total_cases * 100) if total_cases > 0 else 0
-            st.metric("Létalité", f"{cfr:.1f}%")
-         #🔵 NOUVEAU : KPI POPULATION
-        iso3pays = st.session_state.get("iso3pays_courant", None)   # ← relecture FRAÎCHE
+            st.metric("⚠️ Létalité", f"{cfr:.1f}%")
+
+        # KPI Population
+        iso3pays = st.session_state.get("iso3pays_courant", None)
         cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
         if st.session_state.get(cache_key_pop) is not None and not st.session_state[cache_key_pop].empty:
-            df_pop = st.session_state[cache_key_pop].copy()         # ← .copy() pour isolation
-            # si filtres zone appliqués
+            df_pop = st.session_state[cache_key_pop].copy()
             if area_selected:
                 df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
-
+            st.markdown("<br>", unsafe_allow_html=True)
             colp1, colp2, colp3 = st.columns(3)
             with colp1:
-                st.metric("Population totale", f"{int(df_pop['Pop_Totale'].sum()):,}".replace(",", " "))
+                st.metric("👥 Population totale",
+                          f"{int(df_pop['Pop_Totale'].sum()):,}".replace(",", " ")
+                          if "Pop_Totale" in df_pop.columns else "N/A")
             with colp2:
-                st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " "))
+                st.metric("👶 Enfants 0–14 ans",
+                          f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " ")
+                          if "Pop_Enfants_0_14" in df_pop.columns else "N/A")
             with colp3:
-                st.metric("Densité moyenne", f"{df_pop['Densite_Pop'].mean():.1f} hab/km²")
+                st.metric("📏 Densité moyenne",
+                          f"{df_pop['Densite_Pop'].mean():.1f} hab/km²"
+                          if "Densite_Pop" in df_pop.columns else "N/A")
        # Pyramide des âges - VERSION ROBUSTE
             cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
             if st.session_state.get(cache_key_pop) is not None and not st.session_state[cache_key_pop].empty:
