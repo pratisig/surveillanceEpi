@@ -1179,12 +1179,8 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         gdf_health = gdf_health.merge(dfpopulation[cols_pop], on="health_area", how="left")
         st.session_state.gdf_health = gdf_health
 
-    # Affichage stats population
-    if "Pop_Totale" in dfpopulation.columns and dfpopulation["Pop_Totale"].notna().any():
-        col1, col2 = st.sidebar.columns(2)
-        col1.metric("👥 Pop.", f"{int(dfpopulation['Pop_Totale'].sum()):,}")
-        col2.metric("📍 Aires", f"{dfpopulation['Pop_Totale'].notna().sum()}")
-    else:
+    # Info WorldPop
+    if "Pop_Totale" not in dfpopulation.columns or not dfpopulation["Pop_Totale"].notna().any():
         st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")
 
 # ── Récupération iso3pays hors expander (pour les tabs) ───────────────────
