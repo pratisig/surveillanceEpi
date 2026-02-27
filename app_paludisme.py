@@ -1763,12 +1763,13 @@ with tab2:
         cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
         if st.session_state.get(cache_key_pop) is not None:
             _df_pop_raw = st.session_state[cache_key_pop]
-            _cols_to_select = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
-                               if c in _df_pop_raw.columns]
-            df_pop = _df_pop_raw[_cols_to_select].copy()
-            gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
-            pop_count = gdf_map['Pop_Totale'].notna().sum()
-            st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
+            _cols_pop = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
+                         if c in _df_pop_raw.columns]
+            if len(_cols_pop) > 1:
+                df_pop = _df_pop_raw[_cols_pop].copy()
+                gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
+                pop_count = gdf_map['Pop_Totale'].notna().sum() if 'Pop_Totale' in gdf_map.columns else 0
+                st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
         
         # Ajouter moyennes climatiques
         if st.session_state.df_climate_aggregated is not None:
