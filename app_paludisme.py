@@ -1093,6 +1093,69 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         col2.metric("📍 Aires", f"{dfpopulation['Pop_Totale'].notna().sum()}")
     else:
         st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")
+        # ── Chargement CSV cas hebdomadaires ──────────────────────
+    st.markdown("---")
+    cases_file = st.file_uploader("📊 Cas hebdomadaires (CSV)", type=["csv", "txt", "tsv"], key="cases")
+    if cases_file:
+        try:
+            cases_file.seek(0)
+            first_line = cases_file.readline().decode("utf-8").strip()
+            cases_file.seek(0)
+            if "\t" in first_line:
+                separator = "\t"
+            elif ";" in first_line:
+                separator = ";"
+            elif "," in first_line:
+                separator = ","
+            else:
+                separator = None
+            if separator:
+                df = pd.read_csv(cases_file, sep=separator, encoding="utf-8")
+            else:
+                df = pd.read_csv(cases_file, sep=None, engine="python", encoding="utf-8")
+        except UnicodeDecodeError:
+            cases_file.seek(0)
+            try:
+                if separator:
+                    df = pd.read_csv(cases_file, sep=separator, encoding="latin-1")
+                else:
+                    df = pd.read_csv(cases_file, sep=None, engine="python", encoding="latin-1")
+                st.warning("⚠️ Encodage Latin-1 utilisé")
+            except Exception as e:
+                st.error(f"❌ Erreur de lecture : {str(e)}")
+                df = None
+        except Exception as e:
+            st.error(f"❌ Erreur : {str(e)}")
+            df = None
+
+        if df is not None:
+            df.columns = (df.columns.str.strip().str.lower()
+                         .str.replace(" ", "_").str.replace("-", "_"))
+            required = {"health_area", "week_", "cases"}
+            if required.issubset(set(df.columns)):
+                st.success("✅ Toutes les colonnes requises sont présentes")
+                df["health_area"] = df["health_area"].astype(str).str.strip().str.lower()
+                if "deaths" not in df.columns:
+                    df["deaths"] = 0
+                    st.info("ℹ️ Colonne 'deaths' ajoutée avec valeur 0")
+                df["week_"]  = normalize_week_format(df["week_"])
+                df["cases"]  = pd.to_numeric(df["cases"],  errors="coerce").fillna(0).astype(int)
+                df["deaths"] = pd.to_numeric(df["deaths"], errors="coerce").fillna(0).astype(int)
+                df["week_"]  = pd.to_numeric(df["week_"],  errors="coerce").fillna(1).astype(int)
+                df = df[(df["cases"] >= 0) & (df["week_"] > 0)]
+                st.session_state.df_cases = df
+                st.success(f"✅ {len(df)} enregistrements chargés")
+                with st.expander("👁️ Aperçu"):
+                    st.dataframe(df.head())
+                with st.expander("📊 Statistiques"):
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total cas",     int(df["cases"].sum()))
+                    col2.metric("Total décès",   int(df["deaths"].sum()))
+                    col3.metric("Aires uniques",  df["health_area"].nunique())
+            else:
+                missing = required - set(df.columns)
+                st.error(f"❌ Colonnes manquantes : {missing}")
+                st.error(f"📋 Colonnes trouvées : {list(df.columns)}")
 # Récupération iso3pays hors du bloc sidebar (pour les tabs)
 iso3pays = st.session_state.get("iso3pays_courant", None)
 # === API CLIMAT - MULTIPLE SOURCES ===
@@ -2799,6 +2862,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
