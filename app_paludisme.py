@@ -810,31 +810,32 @@ def create_spatial_clusters(gdf, n_clusters=5):
     return clusters, kmeans
 
 def calculate_spatial_lag(gdf, values, k_neighbors=5):
-    """
-    Calcule le lag spatial (influence des zones voisines)
-    """
+    """Calcule le lag spatial — influence des zones voisines"""
     from scipy.spatial.distance import cdist
-    
-    # Extraire centroides
-    centroids = np.array([[geom.centroid.x, geom.centroid.y] for geom in gdf.geometry])
-    
-    # Matrice de distances
+
+    # Réinitialiser l'index pour garantir un alignement positionnel
+    gdf    = gdf.reset_index(drop=True)
+    values = values.reset_index(drop=True)
+
+    centroids   = np.array([[geom.centroid.x, geom.centroid.y] for geom in gdf.geometry])
     dist_matrix = cdist(centroids, centroids, metric='euclidean')
-    
-    # Pour chaque zone, moyenne pondérée des k plus proches voisins
+
+    n = len(gdf)
+    k = min(k_neighbors, n - 1)   # ← sécurité si peu d'aires
+
     spatial_lag = []
-    for i in range(len(gdf)):
-        # Indices des k plus proches (excluant soi-même)
-        neighbors_idx = np.argsort(dist_matrix[i])[1:k_neighbors+1]
-        
-        # Distances inverses comme poids
+    for i in range(n):
+        neighbors_idx = np.argsort(dist_matrix[i])[1:k+1]
+        # Vérification que les indices sont dans les bornes
+        neighbors_idx = neighbors_idx[neighbors_idx < n]
+        if len(neighbors_idx) == 0:
+            spatial_lag.append(0.0)
+            continue
         weights = 1 / (dist_matrix[i, neighbors_idx] + 1e-6)
         weights = weights / weights.sum()
-        
-        # Moyenne pondérée
-        lag_value = np.sum(values.iloc[neighbors_idx] * weights)
+        lag_value = np.sum(values.iloc[neighbors_idx].values * weights)  # ← .values évite tout pb d'index
         spatial_lag.append(lag_value)
-    
+
     return np.array(spatial_lag)
 
 def perform_pca_analysis(df, feature_cols, explained_variance_threshold=0.95):
@@ -2187,10 +2188,17 @@ with tab3:
                         # Lag spatial
                         spatial_lag_values = []
                         for week in df_model['week_num'].unique():
-                            df_week = df_model[df_model['week_num'] == week].sort_values('health_area')
-                            cases_week = df_week.set_index('health_area')['cases']
-                            gdf_aligned = gdf_env.set_index('health_area').loc[cases_week.index]
-                            lag_values = calculate_spatial_lag(gdf_aligned.reset_index(), cases_week, k_neighbors)
+                           df_week    = df_model[df_model['week_num'] == week].sort_values('health_area').reset_index(drop=True)
+                           cases_week = df_week['cases'].reset_index(drop=True)
+                           # Aligner gdf_env sur les mêmes health_area dans le même ordre
+                           common_areas = df_week['health_area'].tolist()
+                           gdf_aligned  = gdf_env[gdf_env['health_area'].isin(common_areas)].copy()
+                           gdf_aligned  = gdf_aligned.set_index('health_area').loc[common_areas].reset_index()
+                           if len(gdf_aligned) != len(cases_week):
+                               spatial_lag_values.extend([0.0] * len(df_week))
+                               continue
+                           lag_values = calculate_spatial_lag(gdf_aligned, cases_week, k_neighbors)
+                           spatial_lag_values.extend(lag_values.tolist())
                             spatial_lag_values.extend(lag_values)
                         df_model['spatial_lag'] = spatial_lag_values
                     progress_bar.progress(60)
