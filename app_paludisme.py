@@ -103,7 +103,7 @@ st.markdown("""
 # ============================================================
 for key in ["gdf_health", "df_cases", "temp_raster", "flood_raster", "rivers_gdf",
             "precipitation_raster", "humidity_raster", "elevation_raster", "model_results",
-            "df_climate_aggregated"]:
+            "df_climate_aggregated","enrichi_bfa", "enrichi_mli", "enrichi_ner", "enrichi_mrt", "enrichi_upload"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -1032,6 +1032,8 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         if st.session_state["pays_precedent"] != pays_selectionne:
             st.session_state["pays_precedent"] = pays_selectionne
             st.session_state["sa_gdf_cache"]   = None
+            for k in [f"enrichi_{v}" for v in PAYS_ISO3_MAP.values()]:
+                st.session_state[k] = None
     else:
         upload_file = st.file_uploader(
             "Aires de santé (GeoJSON/SHP/ZIP)",
@@ -2873,6 +2875,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
