@@ -1560,10 +1560,16 @@ with tab1:
             
             with col_graph2:
                 # Graphique CLIMAT
-                df_week_climate = df_clim.groupby("week_").agg({
-                    col: 'mean' for col in df_clim.columns 
-                    if col.endswith('_api') and '_min' not in col and '_max' not in col
-                }).reset_index()
+                if st.session_state.df_climate_aggregated is not None:
+                    df_clim_graph = st.session_state.df_climate_aggregated.copy()
+                    if week_selected:
+                        df_clim_graph = df_clim_graph[df_clim_graph["week_"].isin(week_selected)]
+                    if area_selected:
+                        df_clim_graph = df_clim_graph[df_clim_graph["health_area"].isin(area_selected)]
+                    df_week_climate = df_clim_graph.groupby("week_").agg({
+                        col: 'mean' for col in df_clim_graph.columns
+                        if col.endswith('_api') and '_min' not in col and '_max' not in col
+                    }).reset_index()
                 
                 fig_climate = go.Figure()
                 
