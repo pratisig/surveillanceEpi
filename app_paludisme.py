@@ -1778,17 +1778,27 @@ with tab2:
         gdf_map = gdf_health.merge(df_agg, on="health_area", how="left")
         gdf_map[["cases","deaths"]] = gdf_map[["cases","deaths"]].fillna(0)
         
-        # ✅ MERGER POPULATION dans gdf_map
-        cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
-        if st.session_state.get(cache_key_pop) is not None:
-            _df_pop_raw = st.session_state[cache_key_pop]
-            _cols_pop = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
-                         if c in _df_pop_raw.columns]
+       # ✅ MERGER POPULATION dans gdf_map
+        _pop_cols_attendus = ['Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
+        _pop_cols_manquants = [c for c in _pop_cols_attendus if c not in gdf_map.columns]
+        if _pop_cols_manquants and 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None:
+            _df_pop_raw = st.session_state.dfpopulation
+            _cols_pop = ['health_area'] + [c for c in _pop_cols_manquants if c in _df_pop_raw.columns]
+            if 'Densite_Pop' in _pop_cols_manquants and 'Densite_Pop' not in _df_pop_raw.columns:
+                if 'Densite_Pop' in st.session_state.gdf_health.columns:
+                    _df_pop_raw = _df_pop_raw.merge(
+                        st.session_state.gdf_health[['health_area', 'Densite_Pop']],
+                        on='health_area', how='left'
+                    )
+                    _cols_pop = ['health_area'] + [c for c in _pop_cols_manquants if c in _df_pop_raw.columns]
             if len(_cols_pop) > 1:
-                df_pop = _df_pop_raw[_cols_pop].copy()
-                gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
-                pop_count = gdf_map['Pop_Totale'].notna().sum() if 'Pop_Totale' in gdf_map.columns else 0
-                st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
+                gdf_map = gdf_map.merge(_df_pop_raw[_cols_pop], on='health_area', how='left')
+        for _c in _pop_cols_attendus:
+            if _c not in gdf_map.columns:
+                gdf_map[_c] = np.nan
+        _pop_ok = gdf_map['Pop_Totale'].notna().sum()
+        if _pop_ok > 0:
+            st.info(f"✅ Population disponible : {_pop_ok}/{len(gdf_map)} aires")
         
         # Ajouter moyennes climatiques
         if st.session_state.df_climate_aggregated is not None:
@@ -2188,18 +2198,20 @@ with tab3:
                         # Lag spatial
                         spatial_lag_values = []
                         for week in df_model['week_num'].unique():
-                           df_week    = df_model[df_model['week_num'] == week].sort_values('health_area').reset_index(drop=True)
-                           cases_week = df_week['cases'].reset_index(drop=True)
-                           # Aligner gdf_env sur les mêmes health_area dans le même ordre
-                           common_areas = df_week['health_area'].tolist()
-                           gdf_aligned  = gdf_env[gdf_env['health_area'].isin(common_areas)].copy()
-                           gdf_aligned  = gdf_aligned.set_index('health_area').loc[common_areas].reset_index()
-                           if len(gdf_aligned) != len(cases_week):
-                               spatial_lag_values.extend([0.0] * len(df_week))
-                               continue
-                           lag_values = calculate_spatial_lag(gdf_aligned, cases_week, k_neighbors)
-                           spatial_lag_values.extend(lag_values.tolist())
-                            spatial_lag_values.extend(lag_values)
+                            df_week = (df_model[df_model['week_num'] == week]
+                                       .sort_values('health_area')
+                                       .reset_index(drop=True))
+                            cases_week   = df_week['cases'].reset_index(drop=True)
+                            common_areas = df_week['health_area'].tolist()
+                            gdf_aligned  = (gdf_env[gdf_env['health_area'].isin(common_areas)]
+                                            .set_index('health_area')
+                                            .loc[common_areas]
+                                            .reset_index())
+                            if len(gdf_aligned) != len(cases_week):
+                                spatial_lag_values.extend([0.0] * len(df_week))
+                                continue
+                            lag_values = calculate_spatial_lag(gdf_aligned, cases_week, k_neighbors)
+                            spatial_lag_values.extend(lag_values.tolist())
                         df_model['spatial_lag'] = spatial_lag_values
                     progress_bar.progress(60)
                     
