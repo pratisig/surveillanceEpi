@@ -923,11 +923,31 @@ st.sidebar.header("📁 Chargement des Données")
 
 with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
+    PAYS_AUTORISES = {
+        "BFA": "🇧🇫 Burkina Faso",
+        "MLI": "🇲🇱 Mali",
+        "NER": "🇳🇪 Niger",
+        "MRT": "🇲🇷 Mauritanie"
+    }
+
     source_geo = st.radio(
         "Source des Aires de Santé",
         ["Charger un fichier (GeoJSON/SHP/ZIP)", "Fichier local (ao_hlthArea.zip)"],
         key="source_geo_palu"
     )
+
+    # Sélection pays toujours visible pour Option 2
+    if source_geo == "Fichier local (ao_hlthArea.zip)":
+        pays_choisi = st.selectbox(
+            "🌍 Sélectionner le pays",
+            list(PAYS_AUTORISES.keys()),
+            format_func=lambda x: PAYS_AUTORISES[x],
+            key="pays_local_select"
+        )
+        # Si le pays change, forcer le rechargement
+        if st.session_state.get("pays_local_precedent") != pays_choisi:
+            st.session_state.gdf_health = None
+            st.session_state["pays_local_precedent"] = pays_choisi
 
     if st.session_state.gdf_health is not None:
         st.success(f"✅ {len(st.session_state.gdf_health)} aires chargées (cache)")
@@ -988,24 +1008,17 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
                     gdf_all = ensure_wgs84(gdf_all)
 
-                    # Sélection du pays via iso3
-                    pays_disponibles = sorted(gdf_all["iso3"].dropna().unique().tolist()) if "iso3" in gdf_all.columns else []
-                    pays_labels = {"BFA": "🇧🇫 Burkina Faso", "MLI": "🇲🇱 Mali", "NER": "🇳🇪 Niger", "MRT": "🇲🇷 Mauritanie"}
-                    
-                    if pays_disponibles:
-                        pays_choisi = st.selectbox(
-                            "🌍 Sélectionner le pays",
-                            pays_disponibles,
-                            format_func=lambda x: pays_labels.get(x, x),
-                            key="pays_local_select"
-                        )
+                    # Filtrer sur le pays choisi (iso3 uniquement parmi les 4 autorisés)
+                    if "iso3" in gdf_all.columns:
                         gdf = gdf_all[gdf_all["iso3"] == pays_choisi].copy()
-                        st.info(f"📍 {pays_labels.get(pays_choisi, pays_choisi)} : {len(gdf)} aires de santé")
                     else:
                         gdf = gdf_all.copy()
 
+                    st.info(f"📍 {PAYS_AUTORISES[pays_choisi]} : {len(gdf)} aires de santé")
+
                     # Normaliser la colonne nom
-                    _ha_col = next((c for c in ["health_area", "health_are", "name_fr", "namefr", "name", "nom"]
+                    _ha_col = next((c for c in ["health_area", "health_are", "name_fr",
+                                                 "namefr", "name", "nom"]
                                     if c in gdf.columns), None)
                     if _ha_col is None:
                         st.error("❌ Aucune colonne nom trouvée dans le shapefile local")
@@ -2842,6 +2855,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
