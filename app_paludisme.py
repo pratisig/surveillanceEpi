@@ -1522,97 +1522,77 @@ with tab1:
 
             # CORRECTION: Graphiques séparés
             st.markdown("### 📈 Évolution Hebdomadaire")
-            
-            col_graph1, col_graph2 = st.columns(2)
-            
-            with col_graph1:
-                # Graphique CAS et DÉCÈS
-                df_week_cases = df_w.groupby("week_").agg({"cases": "sum", "deaths": "sum"}).reset_index()
-                
-                fig_cases = go.Figure()
-                
-                fig_cases.add_trace(go.Bar(
-                    x=df_week_cases["week_"],
-                    y=df_week_cases["cases"],
-                    name='Cas',
-                    marker_color='#FF6B6B'
-                ))
-                
-                fig_cases.add_trace(go.Scatter(
-                    x=df_week_cases["week_"],
-                    y=df_week_cases["deaths"],
-                    mode='lines+markers',
-                    name='Décès',
-                    line=dict(color='#4ECDC4', width=3),
-                    yaxis='y2'
-                ))
-                
-                fig_cases.update_layout(
-                    title="Cas et Décès par Semaine",
-                    xaxis_title="Semaine",
-                    yaxis=dict(title="Nombre de Cas"),
-                    yaxis2=dict(title="Nombre de Décès", overlaying='y', side='right'),
-                    height=400,
-                    hovermode='x unified'
-                )
-                
-                st.plotly_chart(fig_cases, use_container_width=True)
-            
-            with col_graph2:
-                # Graphique CLIMAT
-                if st.session_state.df_climate_aggregated is not None:
-                    df_clim_graph = st.session_state.df_climate_aggregated.copy()
-                    if week_selected:
-                        df_clim_graph = df_clim_graph[df_clim_graph["week_"].isin(week_selected)]
-                    if area_selected:
-                        df_clim_graph = df_clim_graph[df_clim_graph["health_area"].isin(area_selected)]
-                    df_week_climate = df_clim_graph.groupby("week_").agg({
-                        col: 'mean' for col in df_clim_graph.columns
-                        if col.endswith('_api') and '_min' not in col and '_max' not in col
-                    }).reset_index()
-                
+
+        col_graph1, col_graph2 = st.columns(2)
+
+        with col_graph1:
+            # Graphique CAS et DÉCÈS
+            df_week_cases = df_w.groupby("week_").agg({"cases": "sum", "deaths": "sum"}).reset_index()
+
+            fig_cases = go.Figure()
+            fig_cases.add_trace(go.Bar(
+                x=df_week_cases["week_"], y=df_week_cases["cases"],
+                name='Cas', marker_color='#FF6B6B'
+            ))
+            fig_cases.add_trace(go.Scatter(
+                x=df_week_cases["week_"], y=df_week_cases["deaths"],
+                mode='lines+markers', name='Décès',
+                line=dict(color='#4ECDC4', width=3), yaxis='y2'
+            ))
+            fig_cases.update_layout(
+                title="Cas et Décès par Semaine",
+                xaxis_title="Semaine",
+                yaxis=dict(title="Nombre de Cas"),
+                yaxis2=dict(title="Nombre de Décès", overlaying='y', side='right'),
+                height=400, hovermode='x unified'
+            )
+            st.plotly_chart(fig_cases, use_container_width=True)
+
+        with col_graph2:
+            # Graphique CLIMAT — uniquement si données disponibles
+            if st.session_state.df_climate_aggregated is not None:
+                _df_clim_g = st.session_state.df_climate_aggregated.copy()
+                if week_selected:
+                    _df_clim_g = _df_clim_g[_df_clim_g["week_"].isin(week_selected)]
+                if area_selected:
+                    _df_clim_g = _df_clim_g[_df_clim_g["health_area"].isin(area_selected)]
+
+                df_week_climate = _df_clim_g.groupby("week_").agg({
+                    col: 'mean' for col in _df_clim_g.columns
+                    if col.endswith('_api') and '_min' not in col and '_max' not in col
+                }).reset_index()
+
                 fig_climate = go.Figure()
-                
                 if 'temp_api' in df_week_climate.columns:
                     fig_climate.add_trace(go.Scatter(
-                        x=df_week_climate["week_"],
-                        y=df_week_climate["temp_api"],
-                        mode='lines+markers',
-                        name='Température (°C)',
+                        x=df_week_climate["week_"], y=df_week_climate["temp_api"],
+                        mode='lines+markers', name='Température (°C)',
                         line=dict(color='orange', width=3)
                     ))
-                
                 if 'precip_api' in df_week_climate.columns:
                     fig_climate.add_trace(go.Scatter(
-                        x=df_week_climate["week_"],
-                        y=df_week_climate["precip_api"],
-                        mode='lines+markers',
-                        name='Précipitations (mm)',
-                        line=dict(color='blue', width=2),
-                        yaxis='y2'
+                        x=df_week_climate["week_"], y=df_week_climate["precip_api"],
+                        mode='lines+markers', name='Précipitations (mm)',
+                        line=dict(color='blue', width=2), yaxis='y2'
                     ))
-                
                 if 'humidity_api' in df_week_climate.columns:
                     fig_climate.add_trace(go.Scatter(
-                        x=df_week_climate["week_"],
-                        y=df_week_climate["humidity_api"],
-                        mode='lines+markers',
-                        name='Humidité (%)',
-                        line=dict(color='green', width=2, dash='dash'),
-                        yaxis='y3'
+                        x=df_week_climate["week_"], y=df_week_climate["humidity_api"],
+                        mode='lines+markers', name='Humidité (%)',
+                        line=dict(color='green', width=2, dash='dash'), yaxis='y3'
                     ))
-                
                 fig_climate.update_layout(
                     title="Données Climatiques par Semaine",
                     xaxis_title="Semaine",
-                    yaxis=dict(title="Temp (°C)"),
-                    yaxis2=dict(title="Précip (mm)", overlaying='y', side='right'),
-                    yaxis3=dict(title="Humid (%)", overlaying='y', side='right', anchor='free', position=0.95),
-                    height=400,
-                    hovermode='x unified'
+                    yaxis=dict(title="Temp °C"),
+                    yaxis2=dict(title="Précip mm", overlaying='y', side='right'),
+                    yaxis3=dict(title="Humid %", overlaying='y', side='right',
+                                anchor='free', position=0.95),
+                    height=400, hovermode='x unified'
                 )
-                
                 st.plotly_chart(fig_climate, use_container_width=True)
+            else:
+                st.info("ℹ️ Activez l'API Climat pour afficher les données climatiques ici.")
 
         st.subheader("📈 Évolution Temporelle")
         
