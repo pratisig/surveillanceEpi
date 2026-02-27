@@ -262,7 +262,7 @@ use_gee = gee_ok  # ✅ Utiliser le résultat de init_gee()
 # -------------------------
 # Fonction WorldPop UNIQUE
 # -------------------------
-@st.cache_data
+
 def worldpop_malaria_stats(_sa_gdf, use_gee):
     """Calqué sur worldpop_children_stats (rougeole)."""
     if not use_gee:
@@ -1071,44 +1071,9 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
     # Synchronisation session_state.gdf_health (utilisé dans le reste du code)
     st.session_state.gdf_health = gdf_health
-
-    # ── WorldPop — cache par pays (pattern rougeole) ──────────
-    cache_key = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
-    if cache_key not in st.session_state or st.session_state[cache_key] is None:
-        with st.spinner("📥 Enrichissement WorldPop..."):
-            dfpopulation = worldpop_malaria_stats(gdf_health, gee_ok)
-            # Calcul densité (surface en projection locale)
-            gdf_m = gdf_health.to_crs("ESRI:54009")
-            surf  = gdf_m.geometry.area / 1e6
-            gdf_health_tmp = gdf_health.copy()
-            gdf_health_tmp["Superficie_km2"] = surf.values
-            dfpopulation = dfpopulation.merge(
-                gdf_health_tmp[["health_area", "Superficie_km2"]], on="health_area", how="left"
-            )
-            dfpopulation["Densite_Pop"] = (
-                dfpopulation["Pop_Totale"] / dfpopulation["Superficie_km2"].replace(0, np.nan)
-            )
-            st.session_state[cache_key] = dfpopulation
-    else:
-        dfpopulation = st.session_state[cache_key]
-
-    # Merge population → gdf_health
-    cols_pop = [c for c in ["health_area", "Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"]
-                if c in dfpopulation.columns]
-    if len(cols_pop) > 1:
-        gdf_health = gdf_health.merge(dfpopulation[cols_pop], on="health_area", how="left")
-        st.session_state.gdf_health = gdf_health
-
-    # Affichage stats
-    if "Pop_Totale" in dfpopulation.columns and dfpopulation["Pop_Totale"].notna().any():
-        col1, col2 = st.sidebar.columns(2)
-        col1.metric("👥 Pop.", f"{int(dfpopulation['Pop_Totale'].sum()):,}")
-        col2.metric("📍 Aires", f"{dfpopulation['Pop_Totale'].notna().sum()}")
-    else:
-        st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")
-        # ── Chargement CSV cas hebdomadaires ──────────────────────
-    st.markdown("---")
-    cases_file = st.file_uploader("📊 Cas hebdomadaires (CSV)", type=["csv", "txt", "tsv"], key="cases")
+# ── Chargement CSV cas hebdomadaires ──────────────────────
+st.markdown("---")
+cases_file = st.file_uploader("📊 Cas hebdomadaires (CSV)", type=["csv", "txt", "tsv"], key="cases")
     if cases_file:
         try:
             cases_file.seek(0)
@@ -1169,6 +1134,41 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                 missing = required - set(df.columns)
                 st.error(f"❌ Colonnes manquantes : {missing}")
                 st.error(f"📋 Colonnes trouvées : {list(df.columns)}")
+    # ── WorldPop — cache par pays (pattern rougeole) ──────────
+    cache_key = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
+    if cache_key not in st.session_state or st.session_state[cache_key] is None:
+        with st.spinner("📥 Enrichissement WorldPop..."):
+            dfpopulation = worldpop_malaria_stats(gdf_health, gee_ok)
+            # Calcul densité (surface en projection locale)
+            gdf_m = gdf_health.to_crs("ESRI:54009")
+            surf  = gdf_m.geometry.area / 1e6
+            gdf_health_tmp = gdf_health.copy()
+            gdf_health_tmp["Superficie_km2"] = surf.values
+            dfpopulation = dfpopulation.merge(
+                gdf_health_tmp[["health_area", "Superficie_km2"]], on="health_area", how="left"
+            )
+            dfpopulation["Densite_Pop"] = (
+                dfpopulation["Pop_Totale"] / dfpopulation["Superficie_km2"].replace(0, np.nan)
+            )
+            st.session_state[cache_key] = dfpopulation
+    else:
+        dfpopulation = st.session_state[cache_key]
+
+    # Merge population → gdf_health
+    cols_pop = [c for c in ["health_area", "Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"]
+                if c in dfpopulation.columns]
+    if len(cols_pop) > 1:
+        gdf_health = gdf_health.merge(dfpopulation[cols_pop], on="health_area", how="left")
+        st.session_state.gdf_health = gdf_health
+
+    # Affichage stats
+    if "Pop_Totale" in dfpopulation.columns and dfpopulation["Pop_Totale"].notna().any():
+        col1, col2 = st.sidebar.columns(2)
+        col1.metric("👥 Pop.", f"{int(dfpopulation['Pop_Totale'].sum()):,}")
+        col2.metric("📍 Aires", f"{dfpopulation['Pop_Totale'].notna().sum()}")
+    else:
+        st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")   
+    
 # Récupération iso3pays hors du bloc sidebar (pour les tabs)
 iso3pays = st.session_state.get("iso3pays_courant", None)
 # === API CLIMAT - MULTIPLE SOURCES ===
@@ -1729,7 +1729,10 @@ with tab2:
         # ✅ MERGER POPULATION dans gdf_map
         cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
         if st.session_state.get(cache_key_pop) is not None:
-            df_pop = st.session_state[cache_key_pop][['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
+            _df_pop_raw = st.session_state[cache_key_pop]
+			_cols_to_select = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
+							   if c in _df_pop_raw.columns]
+			df_pop = _df_pop_raw[_cols_to_select].copy()
             gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
             pop_count = gdf_map['Pop_Totale'].notna().sum()
             st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
@@ -2875,6 +2878,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
