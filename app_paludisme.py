@@ -38,7 +38,12 @@ import warnings
 import requests
 import json
 from shapely.geometry import Point
-
+import tempfile
+import zipfile
+import os
+import base64
+from io import BytesIO
+from branca.colormap import linear
 
 
 # ============================================================
@@ -96,7 +101,7 @@ st.markdown("""
 # ============================================================
 # SESSION STATE
 # ============================================================
-or key in ["gdf_health", "df_cases", "temp_raster", "flood_raster", "rivers_gdf",
+for key in ["gdf_health", "df_cases", "temp_raster", "flood_raster", "rivers_gdf",
             "precipitation_raster", "humidity_raster", "elevation_raster", "model_results",
             "df_climate_aggregated"]:
     if key not in st.session_state:
@@ -987,12 +992,12 @@ def load_shapefile_from_upload(upload_file):
 # ============================================================
 
 st.sidebar.header("📁 Chargement des Données")
-      PAYS_ISO3_MAP = {
+PAYS_ISO3_MAP = {
     "Burkina Faso": "bfa",
     "Mali":         "mli",
     "Niger":        "ner",
     "Mauritanie":   "mrt"
-}
+}      
 with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
     source_geo = st.radio(
@@ -1089,95 +1094,7 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
         st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")
 
     else:
-
-        # ── Option 1 : Upload utilisateur ─────────────────────
-        if source_geo == "Charger un fichier (GeoJSON/SHP/ZIP)":
-            health_file = st.file_uploader(
-                "Aires de santé (GeoJSON/SHP/ZIP)",
-                type=["geojson", "shp", "zip"],
-                key="health_upload"
-            )
-            if health_file:
-                import tempfile, zipfile
-                try:
-                    if health_file.name.endswith(".zip"):
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            zip_path_up = os.path.join(tmpdir, "upload.zip")
-                            with open(zip_path_up, "wb") as f:
-                                f.write(health_file.getvalue())
-                            with zipfile.ZipFile(zip_path_up, "r") as z:
-                                z.extractall(tmpdir)
-                            shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                            if not shp_files:
-                                raise ValueError("Aucun .shp dans le ZIP")
-                            gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
-                    else:
-                        gdf = gpd.read_file(health_file)
-
-                    gdf = ensure_wgs84(gdf)
-                    if "health_area" not in gdf.columns:
-                        st.error("❌ Colonne 'health_area' absente")
-                        st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
-                    else:
-                        gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                        st.session_state.gdf_health = gdf
-                        st.success(f"✅ {len(gdf)} aires chargées")
-
-                except Exception as e:
-                    st.error(f"❌ Erreur lecture fichier : {str(e)}")
-
-        # ── Option 2 : Fichier local ───────────────────────────
-        else:
-            import tempfile, zipfile
-            zip_path = os.path.join("data", "ao_hlthArea.zip")
-            if not os.path.exists(zip_path):
-                st.warning("⚠️ Fichier 'data/ao_hlthArea.zip' non trouvé")
-                st.info("📁 Placez le fichier dans le dossier 'data/' puis rechargez")
-            else:
-                try:
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        with zipfile.ZipFile(zip_path, "r") as z:
-                            z.extractall(tmpdir)
-                        shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
-                        if not shp_files:
-                            raise ValueError("Aucun fichier .shp dans le ZIP")
-                        gdf_all = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
-
-                    gdf_all = ensure_wgs84(gdf_all)
-
-                    # Filtrer sur le pays choisi (iso3 uniquement parmi les 4 autorisés)
-                    if "iso3" in gdf_all.columns:
-                        iso3_norm = gdf_all["iso3"].astype(str).str.strip().str.upper()
-                        gdf = gdf_all[iso3_norm == pays_choisi].copy()
-                        if len(gdf) == 0:
-                            valeurs_reelles = gdf_all["iso3"].unique().tolist()
-                            st.error(f"❌ Aucune aire trouvée pour '{pays_choisi}'")
-                            st.info(f"📋 Valeurs iso3 disponibles dans le fichier : {valeurs_reelles}")
-                    else:
-                        gdf = gdf_all.copy()
-
-                    st.info(f"📍 {PAYS_AUTORISES[pays_choisi]} : {len(gdf)} aires de santé")
-
-                    # Normaliser la colonne nom
-                    _ha_col = next((c for c in ["health_area", "health_are", "name_fr",
-                                                 "namefr", "name", "nom"]
-                                    if c in gdf.columns), None)
-                    if _ha_col is None:
-                        st.error("❌ Aucune colonne nom trouvée dans le shapefile local")
-                        st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
-                    else:
-                        gdf["health_area"] = gdf[_ha_col].astype(str).str.strip().str.lower()
-                        if _ha_col != "health_area":
-                            st.info(f"ℹ️ Colonne '{_ha_col}' utilisée comme 'health_area'")
-                        st.session_state.gdf_health = gdf
-                        st.success(f"✅ {len(gdf)} aires chargées")
-
-                except Exception as e:
-                    st.error(f"❌ Erreur lecture fichier local : {str(e)}")
-
-    
-
-                
+               
                  # 📊 Cas hebdomadaires
     cases_file = st.file_uploader("Cas hebdomadaires (CSV)", type=["csv", "txt", "tsv"], key="cases")
     if cases_file:
@@ -1419,8 +1336,9 @@ with tab1:
             cfr = (total_deaths / total_cases * 100) if total_cases > 0 else 0
             st.metric("Létalité", f"{cfr:.1f}%")
          #🔵 NOUVEAU : KPI POPULATION
-        if "dfpopulation" in st.session_state and not st.session_state.dfpopulation.empty:
-            df_pop = st.session_state.dfpopulation
+        cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
+        if st.session_state.get(cache_key_pop) is not None and not st.session_state[cache_key_pop].empty:
+            df_pop = st.session_state[cache_key_pop]
             # si filtres zone appliqués
             if area_selected:
                 df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
@@ -1432,38 +1350,10 @@ with tab1:
                 st.metric("Enfants 0–14 ans", f"{int(df_pop['Pop_Enfants_0_14'].sum()):,}".replace(",", " "))
             with colp3:
                 st.metric("Densité moyenne", f"{df_pop['Densite_Pop'].mean():.1f} hab/km²")
-        # Section climat
-        if st.session_state.df_climate_aggregated is not None:
-            st.markdown("---")
-            st.subheader("🌡️ Indicateurs Climatiques")
-            
-            df_clim = st.session_state.df_climate_aggregated.copy()
-            
-            if week_selected:
-                df_clim = df_clim[df_clim["week_"].isin(week_selected)]
-            if area_selected:
-                df_clim = df_clim[df_clim["health_area"].isin(area_selected)]
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                if 'temp_api' in df_clim.columns:
-                    st.metric("🌡️ Temp. Moy.", f"{df_clim['temp_api'].mean():.1f}°C")
-            
-            with col2:
-                if 'precip_api' in df_clim.columns:
-                    st.metric("🌧️ Précip. Total", f"{df_clim['precip_api'].sum():.1f}mm")
-            
-            with col3:
-                if 'humidity_api' in df_clim.columns:
-                    st.metric("💧 Humid. Moy.", f"{df_clim['humidity_api'].mean():.1f}%")
-            
-            with col4:
-                st.metric("📅 Semaines Climat", df_clim['week_'].nunique())
-                
-           # Pyramide des âges - VERSION ROBUSTE
-            if "dfpopulation" in st.session_state and not st.session_state.dfpopulation.empty:
-                df_pop = st.session_state.dfpopulation.copy()
+       # Pyramide des âges - VERSION ROBUSTE
+            cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
+            if st.session_state.get(cache_key_pop) is not None and not st.session_state[cache_key_pop].empty:
+                df_pop = st.session_state[cache_key_pop]
                 if area_selected:
                     df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
             
@@ -1546,7 +1436,35 @@ with tab1:
                     legend={"x": 0.02, "y": 1.02}
                 )
                 
-                st.plotly_chart(fig_pyr, use_container_width=True)
+                st.plotly_chart(fig_pyr, use_container_width=True) 
+       # Section climat
+        if st.session_state.df_climate_aggregated is not None:
+            st.markdown("---")
+            st.subheader("🌡️ Indicateurs Climatiques")
+            
+            df_clim = st.session_state.df_climate_aggregated.copy()
+            
+            if week_selected:
+                df_clim = df_clim[df_clim["week_"].isin(week_selected)]
+            if area_selected:
+                df_clim = df_clim[df_clim["health_area"].isin(area_selected)]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if 'temp_api' in df_clim.columns:
+                    st.metric("🌡️ Temp. Moy.", f"{df_clim['temp_api'].mean():.1f}°C")
+            
+            with col2:
+                if 'precip_api' in df_clim.columns:
+                    st.metric("🌧️ Précip. Total", f"{df_clim['precip_api'].sum():.1f}mm")
+            
+            with col3:
+                if 'humidity_api' in df_clim.columns:
+                    st.metric("💧 Humid. Moy.", f"{df_clim['humidity_api'].mean():.1f}%")
+            
+            with col4:
+                st.metric("📅 Semaines Climat", df_clim['week_'].nunique())
 
 
             # CORRECTION: Graphiques séparés
@@ -1807,8 +1725,9 @@ with tab2:
         gdf_map[["cases","deaths"]] = gdf_map[["cases","deaths"]].fillna(0)
         
         # ✅ MERGER POPULATION dans gdf_map
-        if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None:
-            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
+        cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
+        if st.session_state.get(cache_key_pop) is not None:
+            df_pop = st.session_state[cache_key_pop][['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
             gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
             pop_count = gdf_map['Pop_Totale'].notna().sum()
             st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
@@ -2501,8 +2420,9 @@ with tab4:
         df_corr = df_agg.copy()
         
         # ✅ NOUVEAU : Ajouter population à df_corr
-        if 'dfpopulation' in st.session_state and st.session_state.dfpopulation is not None and not st.session_state.dfpopulation.empty:
-            df_pop = st.session_state.dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']].copy()
+        cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
+        if st.session_state.get(cache_key_pop) is not None and not st.session_state[cache_key_pop].empty:
+            df_pop = st.session_state[cache_key_pop]
             df_corr = df_corr.merge(df_pop, on='health_area', how='left')
             st.info("✅ Données population mergées dans l'analyse")
         else:
@@ -2953,6 +2873,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
