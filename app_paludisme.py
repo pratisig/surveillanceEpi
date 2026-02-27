@@ -980,14 +980,32 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
                             raise ValueError("Aucun fichier .shp dans le ZIP")
                         gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
 
-                    gdf = ensure_wgs84(gdf)
-                    if "health_area" not in gdf.columns:
-                        st.error("❌ Colonne 'health_area' absente du fichier local")
-                        st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
+                    # Normaliser les noms de colonnes
+                    gdf.columns = [c.strip().lower().replace(" ", "_").replace("-", "_")
+                                   for c in gdf.columns]
+
+                    # Chercher la colonne nom parmi toutes les variantes connues
+                    name_col = None
+                    for col in ["health_area", "health_are", "healtharea",
+                                "name_fr", "namefr", "name", "nom",
+                                "aire_sante", "airesante"]:
+                        if col in gdf.columns:
+                            name_col = col
+                            break
+
+                    if name_col:
+                        gdf["health_area"] = gdf[name_col]
+                        if name_col != "health_area":
+                            st.info(f"ℹ️ Colonne '{name_col}' utilisée comme 'health_area'")
                     else:
-                        gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
-                        st.session_state.gdf_health = gdf
-                        st.success(f"✅ {len(gdf)} aires chargées")
+                        st.error("❌ Aucune colonne nom trouvée dans le shapefile local")
+                        st.info(f"📋 Colonnes disponibles : {list(gdf.columns)}")
+                        st.stop()
+
+                    gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+                    gdf = ensure_wgs84(gdf)
+                    st.session_state.gdf_health = gdf
+                    st.success(f"✅ {len(gdf)} aires chargées")
 
                 except Exception as e:
                     st.error(f"❌ Erreur lecture fichier local : {str(e)}")
@@ -2814,6 +2832,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
