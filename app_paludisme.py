@@ -373,7 +373,7 @@ def worldpop_malaria_stats(_sa_gdf, use_gee):
         st.code(traceback.format_exc())
         
         return pd.DataFrame({
-            "health_area": _sa_gdf["health_area"].values,
+            "health_area": _sa_gdf["health_area"].values if "health_area" in _sa_gdf.columns else [f"Aire{i+1}" for i in range(len(_sa_gdf))],
             "Pop_Totale": np.nan,
             "Pop_Enfants_0_14": np.nan,
             "Densite_Pop": np.nan
@@ -2814,6 +2814,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
