@@ -96,11 +96,14 @@ st.markdown("""
 # ============================================================
 # SESSION STATE
 # ============================================================
-for key in ["gdf_health", "df_cases", "temp_raster", "flood_raster", "rivers_gdf", 
+or key in ["gdf_health", "df_cases", "temp_raster", "flood_raster", "rivers_gdf",
             "precipitation_raster", "humidity_raster", "elevation_raster", "model_results",
             "df_climate_aggregated"]:
     if key not in st.session_state:
         st.session_state[key] = None
+
+if "pays_precedent" not in st.session_state: st.session_state["pays_precedent"] = None
+if "sa_gdf_cache"   not in st.session_state: st.session_state["sa_gdf_cache"]   = None
 
 # ============================================================
 # FONCTIONS API CLIMATIQUES
@@ -256,142 +259,112 @@ use_gee = gee_ok  # ✅ Utiliser le résultat de init_gee()
 # -------------------------
 @st.cache_data
 def worldpop_malaria_stats(_sa_gdf, use_gee):
-    """
-    Extrait population détaillée par sexe et âge (<35 ans) + totaux (WorldPop).
-    """
-    # Normalisation défensive : créer 'health_area' si absent (ex: shapefile tronqué)
-    _sa_gdf = _sa_gdf.copy()
-    if "health_area" not in _sa_gdf.columns:
-        _ha_col = next((c for c in ["health_are", "name_fr", "namefr", "name", "nom", "aire_sante"]
-                        if c in _sa_gdf.columns), None)
-        _sa_gdf["health_area"] = _sa_gdf[_ha_col].astype(str).str.strip().str.lower() if _ha_col else [f"Aire{i+1}" for i in range(len(_sa_gdf))]
-
+    """Calqué sur worldpop_children_stats (rougeole)."""
     if not use_gee:
-        # Fallback vide
-        cols = ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
-        cols += [f'Pop_{sex}_{age}' for sex in ['M', 'F'] for age in ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']]
-        return pd.DataFrame({c: [np.nan]*len(_sa_gdf) for c in cols})
-
+        st.sidebar.warning("⚠️ WorldPop / GEE indisponible")
+        return pd.DataFrame({
+            "health_area":      _sa_gdf["health_area"].tolist(),
+            "Pop_Totale":       [np.nan] * len(_sa_gdf),
+            "Pop_Enfants_0_14": [np.nan] * len(_sa_gdf),
+            "Densite_Pop":      [np.nan] * len(_sa_gdf),
+        })
     try:
         import ee
-        import shapely.geometry
-        
-        # ✅ CORRECTION : Utiliser le bon nom de dataset
-        dataset = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex")
-        pop_img = dataset.mosaic()
+        progress_bar = st.sidebar.progress(0)
+        status_text  = st.sidebar.empty()
+        status_text.text("Chargement WorldPop...")
 
-        # ✅ TOUTES les bandes < 35 ans
-        male_bands = ['M_0', 'M_1', 'M_5', 'M_10', 'M_15', 'M_20', 'M_25', 'M_30']
-        female_bands = ['F_0', 'F_1', 'F_5', 'F_10', 'F_15', 'F_20', 'F_25', 'F_30']
+        dataset      = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex")
+        pop_img      = dataset.mosaic()
 
-        # ✅ Fonction qui prend pop_img en paramètre
-        def sum_groups(img, bands):
-            groups = {
-                '0_4': img.select(bands[0]).add(img.select(bands[1])),  # M_0 + M_1
-                '5_9': img.select(bands[2]),
-                '10_14': img.select(bands[3]),
-                '15_19': img.select(bands[4]),
-                '20_24': img.select(bands[5]),
-                '25_29': img.select(bands[6]),
-                '30_34': img.select(bands[7])
-            }
-            return groups
+        male_bands   = ["M_0", "M_1", "M_5", "M_10", "M_15", "M_20", "M_25", "M_30"]
+        female_bands = ["F_0", "F_1", "F_5", "F_10", "F_15", "F_20", "F_25", "F_30"]
 
-        male_groups = sum_groups(pop_img, male_bands)
-        female_groups = sum_groups(pop_img, female_bands)
+        selected_males   = pop_img.select(male_bands)
+        selected_females = pop_img.select(female_bands)
+        total_pop        = pop_img.select("population")
 
-        # Total population
-        total_img = pop_img.select('population')
-        
-        # Pixel area (km²)
-        pixel_area = ee.Image.pixelArea().divide(1e6)
-        total_count = total_img.multiply(pixel_area)
-        
-        # Calculer population par groupe + totaux
-        images = [total_count]
-        
-        for age in ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']:
-            images.append(male_groups[age].multiply(pixel_area).rename(f'male_{age}'))
-            images.append(female_groups[age].multiply(pixel_area).rename(f'female_{age}'))
+        males_sum   = selected_males.reduce(ee.Reducer.sum()).rename("garcons")
+        females_sum = selected_females.reduce(ee.Reducer.sum()).rename("filles")
+        enfants     = males_sum.add(females_sum).rename("enfants")
 
-        # Créer features GEE
+        final_mosaic = (total_pop
+                        .addBands(selected_males)
+                        .addBands(selected_females)
+                        .addBands(males_sum)
+                        .addBands(females_sum)
+                        .addBands(enfants))
+
+        pixel_area         = ee.Image.pixelArea().divide(10000)
+        final_mosaic_count = final_mosaic.multiply(pixel_area)
+
+        # Conversion géométries — pattern rougeole (Polygon/MultiPolygon explicite)
+        status_text.text("Conversion géométries...")
         features = []
         for _, row in _sa_gdf.iterrows():
-            geom = ee.Geometry(row.geometry.__geo_interface__)
-            features.append(ee.Feature(geom, {"health_area": row["health_area"]}))
+            geom  = row.geometry
+            props = {"health_area": row["health_area"]}
+            if geom.geom_type == "Polygon":
+                coords  = [[x, y] for x, y in geom.exterior.coords]
+                ee_geom = ee.Geometry.Polygon(coords)
+            elif geom.geom_type == "MultiPolygon":
+                coords  = [[[x, y] for x, y in poly.exterior.coords] for poly in geom.geoms]
+                ee_geom = ee.Geometry.MultiPolygon(coords)
+            else:
+                continue
+            features.append(ee.Feature(ee_geom, props))
 
         fc = ee.FeatureCollection(features)
 
-        # Combiner toutes les images et réduire
-        combined = ee.Image.cat(images)
-        
-        stats = combined.reduceRegions(
+        status_text.text("Calcul statistiques zonales...")
+        stats      = final_mosaic_count.reduceRegions(
             collection=fc,
             reducer=ee.Reducer.sum(),
-            scale=100
-        ).getInfo()
+            scale=100,
+            crs="EPSG:4326"
+        )
+        status_text.text("Extraction résultats...")
+        stats_info  = stats.getInfo()
+        data_list   = []
+        total_aires = len(stats_info["features"])
 
-        data = []
-        for f in stats["features"]:
-            props = f["properties"]
-            geom = shapely.geometry.shape(f["geometry"])
-            area_km2 = geom.area * 111 * 111  # km² approx
-            
-            # Total population
-            pop_tot = props.get("population", np.nan)
-            
-            # Somme enfants 0-14 (compatibilité)
-            enfants = sum([
-                props.get(f"male_{age}", 0) + props.get(f"female_{age}", 0) 
-                for age in ['0_4', '5_9', '10_14']
-            ])
-            
-            row_data = {
-                "health_area": props["health_area"],
-                "Pop_Totale": pop_tot,
-                "Pop_Enfants_0_14": enfants,
-                "Densite_Pop": pop_tot / area_km2 if area_km2 > 0 and pop_tot > 0 else np.nan
-            }
-            
-            # Ajouter toutes les tranches <35 ans
-            for sex in ['male', 'female']:
-                for age in ['0_4', '5_9', '10_14', '15_19', '20_24', '25_29', '30_34']:
-                    row_data[f"Pop_{sex.upper()}_{age}"] = props.get(f"{sex}_{age}", np.nan)
-            
-            data.append(row_data)
-
-        if not data:
-            st.warning("⚠️ WorldPop : aucune feature retournée par GEE")
-            return pd.DataFrame({
-                "health_area": _sa_gdf["health_area"].values,
-                "Pop_Totale": np.nan,
-                "Pop_Enfants_0_14": np.nan,
-                "Densite_Pop": np.nan
+        for i, feat in enumerate(stats_info["features"]):
+            props     = feat["properties"]
+            pop_tot   = props.get("population", 0)
+            enfants_t = props.get("enfants",    0)
+            data_list.append({
+                "health_area":      props.get("health_area", ""),
+                "Pop_Totale":       int(pop_tot)   if pop_tot   else np.nan,
+                "Pop_Enfants_0_14": int(enfants_t) if enfants_t else np.nan,
+                "Pop_MALE_0_4":     int(props.get("M_0", 0) + props.get("M_1", 0)),
+                "Pop_MALE_5_9":     int(props.get("M_5",  0)),
+                "Pop_MALE_10_14":   int(props.get("M_10", 0)),
+                "Pop_FEMALE_0_4":   int(props.get("F_0", 0) + props.get("F_1", 0)),
+                "Pop_FEMALE_5_9":   int(props.get("F_5",  0)),
+                "Pop_FEMALE_10_14": int(props.get("F_10", 0)),
+                "Densite_Pop":      np.nan,
             })
+            progress_bar.progress(min((i + 1) / total_aires, 1.0))
 
-        df_result = pd.DataFrame(data)
+        progress_bar.empty()
+        status_text.text("WorldPop terminé ✅")
 
-        # Vérification et feedback
-        valid_count = df_result['Pop_Totale'].notna().sum()
-        if valid_count > 0:
-            st.success(f"✅ WorldPop : {valid_count}/{len(df_result)} aires extraites")
-            total = df_result['Pop_Totale'].sum()
-            st.info(f"📊 Population totale : {int(total):,} habitants")
-        else:
-            st.warning("⚠️ WorldPop : aucune donnée valide extraite")
-        
-        return df_result
+        if not data_list:
+            raise ValueError("GEE a retourné 0 features")
+
+        return pd.DataFrame(data_list)
 
     except Exception as e:
-        st.error(f"❌ WorldPop erreur : {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        
+        st.sidebar.error(f"❌ WorldPop : {e}")
+        try: progress_bar.empty()
+        except: pass
+        try: status_text.empty()
+        except: pass
         return pd.DataFrame({
-            "health_area": _sa_gdf["health_area"].values if "health_area" in _sa_gdf.columns else [f"Aire{i+1}" for i in range(len(_sa_gdf))],
-            "Pop_Totale": np.nan,
-            "Pop_Enfants_0_14": np.nan,
-            "Densite_Pop": np.nan
+            "health_area":      _sa_gdf["health_area"].tolist(),
+            "Pop_Totale":       [np.nan] * len(_sa_gdf),
+            "Pop_Enfants_0_14": [np.nan] * len(_sa_gdf),
+            "Densite_Pop":      [np.nan] * len(_sa_gdf),
         })
 
 
@@ -923,76 +896,198 @@ def perform_pca_analysis(df, feature_cols, explained_variance_threshold=0.95):
         }
         
         return pd.DataFrame(X_imputed, columns=feature_cols, index=df.index), None, None, imputer, pca_info
+# ============================================================
+# FONCTIONS CHARGEMENT GÉOGRAPHIQUE (pattern rougeole)
+# ============================================================
+
+@st.cache_data
+def load_health_areas_from_zip(zip_path, iso3filter):
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(tmpdir)
+            shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+            if not shp_files:
+                raise ValueError("Aucun fichier .shp trouvé dans le ZIP")
+            gdf_full = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
+
+        iso3_col = None
+        for col in ["iso3", "ISO3", "isocode", "ISOCODE"]:
+            if col in gdf_full.columns:
+                iso3_col = col
+                break
+        if iso3_col is None:
+            st.warning(f"⚠️ Colonne ISO3 non trouvée. Colonnes : {list(gdf_full.columns)}")
+            return gpd.GeoDataFrame()
+
+        gdf = gdf_full[gdf_full[iso3_col].astype(str).str.strip().str.lower() == iso3filter].copy()
+        if gdf.empty:
+            st.warning(f"⚠️ Aucune aire pour '{iso3filter}'. Valeurs dispo : {gdf_full[iso3_col].unique().tolist()}")
+            return gpd.GeoDataFrame()
+
+        name_col = None
+        for col in ["health_area", "health_are", "name_fr", "name", "NAME", "nom", "NOM"]:
+            if col in gdf.columns:
+                name_col = col
+                break
+        gdf["health_area"] = gdf[name_col].astype(str).str.strip().str.lower() if name_col else [f"aire_{i+1}" for i in range(len(gdf))]
+
+        gdf = gdf[gdf.geometry.is_valid]
+        if gdf.crs is None:
+            gdf = gdf.set_crs(epsg=4326)
+        elif gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+        return gdf
+
+    except Exception as e:
+        st.error(f"❌ Erreur ZIP : {e}")
+        return gpd.GeoDataFrame()
+
+
+def load_shapefile_from_upload(upload_file):
+    try:
+        if upload_file.name.endswith(".zip"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zip_path = os.path.join(tmpdir, "upload.zip")
+                with open(zip_path, "wb") as f:
+                    f.write(upload_file.getvalue())
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extractall(tmpdir)
+                shp_files = [f for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                if shp_files:
+                    gdf = gpd.read_file(os.path.join(tmpdir, shp_files[0]))
+                else:
+                    raise ValueError("Aucun .shp trouvé")
+        else:
+            gdf = gpd.read_file(upload_file)
+
+        if "health_area" not in gdf.columns:
+            for col in ["health_area", "health_are", "name_fr", "name", "NAME", "nom", "NOM"]:
+                if col in gdf.columns:
+                    gdf["health_area"] = gdf[col].astype(str).str.strip().str.lower()
+                    break
+            else:
+                gdf["health_area"] = [f"aire_{i}" for i in range(len(gdf))]
+        else:
+            gdf["health_area"] = gdf["health_area"].astype(str).str.strip().str.lower()
+
+        gdf = gdf[gdf.geometry.is_valid]
+        if gdf.crs is None:
+            gdf = gdf.set_crs(epsg=4326)
+        elif gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+        return gdf
+
+    except Exception as e:
+        st.error(f"❌ Erreur lecture : {e}")
+        return gpd.GeoDataFrame()
 
 # ============================================================
 # SIDEBAR – CHARGEMENT DES DONNÉES
 # ============================================================
 
 st.sidebar.header("📁 Chargement des Données")
-
+      PAYS_ISO3_MAP = {
+    "Burkina Faso": "bfa",
+    "Mali":         "mli",
+    "Niger":        "ner",
+    "Mauritanie":   "mrt"
+}
 with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
-
-    PAYS_AUTORISES = {
-        "BFA": "🇧🇫 Burkina Faso",
-        "MLI": "🇲🇱 Mali",
-        "NER": "🇳🇪 Niger",
-        "MRT": "🇲🇷 Mauritanie"
-    }
 
     source_geo = st.radio(
         "Source des Aires de Santé",
-        ["Charger un fichier (GeoJSON/SHP/ZIP)", "Fichier local (ao_hlthArea.zip)"],
+        ["Fichier local (ao_hlthArea.zip)", "Charger un fichier (GeoJSON/SHP/ZIP)"],
         key="source_geo_palu"
     )
 
-    # Sélection pays toujours visible pour Option 2
-    if source_geo == "Fichier local (ao_hlthArea.zip)":
-        pays_choisi = st.selectbox(
-            "🌍 Sélectionner le pays",
-            list(PAYS_AUTORISES.keys()),
-            format_func=lambda x: PAYS_AUTORISES[x],
-            key="pays_local_select"
-        )
-        # Si le pays change, forcer le rechargement
-        if st.session_state.get("pays_local_precedent") != pays_choisi:
-            st.session_state.gdf_health = None
-            st.session_state["pays_local_precedent"] = pays_choisi
+    iso3pays    = None
+    upload_file = None
 
-    if st.session_state.gdf_health is not None:
-        st.success(f"✅ {len(st.session_state.gdf_health)} aires chargées (cache)")
-        # WorldPop commun aux deux options
-        if 'dfpopulation' not in st.session_state:
-            with st.spinner("📥 Extraction population WorldPop..."):
-                if not use_gee:
-                    st.warning("⚠️ GEE non initialisé - WorldPop désactivé")
-                    st.info("💡 Vérifiez les secrets Streamlit (GEE_SERVICE_ACCOUNT)")
-                gdf = st.session_state.gdf_health
-                dfpopulation = worldpop_malaria_stats(gdf, use_gee)
-                st.info(f"📊 DataFrame retourné : {len(dfpopulation)} lignes")
-                if not dfpopulation.empty:
-                    st.info(f"📊 Colonnes : {list(dfpopulation.columns)}")
-                    st.info(f"📊 Valeurs non-NaN : {dfpopulation['Pop_Totale'].notna().sum()}/{len(dfpopulation)}")
-                if not dfpopulation.empty and dfpopulation['Pop_Totale'].notna().any():
-                    gdf = gdf.merge(
-                        dfpopulation[['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']],
-                        on='health_area',
-                        how='left'
-                    )
-                    st.session_state.gdf_health = gdf
-                    st.session_state.dfpopulation = dfpopulation
-                    total_pop = dfpopulation['Pop_Totale'].sum()
-                    st.success(f"✅ Population : {int(total_pop):,} habitants")
-                else:
-                    st.warning("⚠️ WorldPop non disponible (DataFrame vide ou que des NaN)")
-                    if dfpopulation.empty:
-                        st.error("❌ DataFrame complètement vide")
-                    else:
-                        st.warning("⚠️ Toutes les valeurs sont NaN (vérifier GEE)")
-        if 'dfpopulation' in st.session_state and not st.session_state.dfpopulation.empty:
-            dfpop = st.session_state.dfpopulation
-            col1, col2 = st.sidebar.columns(2)
-            col1.metric("👥 Pop.", f"{int(dfpop['Pop_Totale'].sum()):,}")
-            col2.metric("📍 Aires", f"{dfpop['Pop_Totale'].notna().sum()}")
+    # ── Sélection pays — toujours visible (pattern rougeole) ──
+    if source_geo == "Fichier local (ao_hlthArea.zip)":
+        pays_selectionne = st.selectbox(
+            "🌍 Sélectionner le pays",
+            list(PAYS_ISO3_MAP.keys()),
+            key="pays_select"
+        )
+        iso3pays = PAYS_ISO3_MAP[pays_selectionne]   # "bfa" / "mli" / "ner" / "mrt"
+        if st.session_state["pays_precedent"] != pays_selectionne:
+            st.session_state["pays_precedent"] = pays_selectionne
+            st.session_state["sa_gdf_cache"]   = None
+    else:
+        upload_file = st.file_uploader(
+            "Aires de santé (GeoJSON/SHP/ZIP)",
+            type=["geojson", "shp", "zip"],
+            key="health_upload"
+        )
+
+    # ── Chargement avec cache (pattern rougeole) ──────────────
+    if st.session_state["sa_gdf_cache"] is not None and source_geo == "Fichier local (ao_hlthArea.zip)":
+        gdf_health = st.session_state["sa_gdf_cache"]
+        st.success(f"✅ {len(gdf_health)} aires chargées (cache)")
+    else:
+        if source_geo == "Fichier local (ao_hlthArea.zip)":
+            zip_path = os.path.join("data", "ao_hlthArea.zip")
+            if not os.path.exists(zip_path):
+                st.error(f"❌ Fichier non trouvé : {zip_path}")
+                st.info("📁 Placez ao_hlthArea.zip dans le dossier data/")
+                st.stop()
+            gdf_health = load_health_areas_from_zip(zip_path, iso3pays)
+            if gdf_health.empty:
+                st.error(f"❌ Impossible de charger {pays_selectionne} ({iso3pays})")
+                st.stop()
+            st.sidebar.success(f"✅ {len(gdf_health)} aires chargées ({iso3pays})")
+            st.session_state["sa_gdf_cache"] = gdf_health
+        else:
+            if upload_file is None:
+                st.warning("⚠️ Veuillez uploader un fichier")
+                st.stop()
+            gdf_health = load_shapefile_from_upload(upload_file)
+            if gdf_health.empty:
+                st.error("❌ Fichier invalide")
+                st.stop()
+            st.sidebar.success(f"✅ {len(gdf_health)} aires chargées")
+            st.session_state["sa_gdf_cache"] = gdf_health
+
+    # Synchronisation session_state.gdf_health (utilisé dans le reste du code)
+    st.session_state.gdf_health = gdf_health
+
+    # ── WorldPop — cache par pays (pattern rougeole) ──────────
+    cache_key = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
+    if cache_key not in st.session_state or st.session_state[cache_key] is None:
+        with st.spinner("📥 Enrichissement WorldPop..."):
+            dfpopulation = worldpop_malaria_stats(gdf_health, gee_ok)
+            # Calcul densité (surface en projection locale)
+            gdf_m = gdf_health.to_crs("ESRI:54009")
+            surf  = gdf_m.geometry.area / 1e6
+            gdf_health_tmp = gdf_health.copy()
+            gdf_health_tmp["Superficie_km2"] = surf.values
+            dfpopulation = dfpopulation.merge(
+                gdf_health_tmp[["health_area", "Superficie_km2"]], on="health_area", how="left"
+            )
+            dfpopulation["Densite_Pop"] = (
+                dfpopulation["Pop_Totale"] / dfpopulation["Superficie_km2"].replace(0, np.nan)
+            )
+            st.session_state[cache_key] = dfpopulation
+    else:
+        dfpopulation = st.session_state[cache_key]
+
+    # Merge population → gdf_health
+    cols_pop = [c for c in ["health_area", "Pop_Totale", "Pop_Enfants_0_14", "Densite_Pop"]
+                if c in dfpopulation.columns]
+    if len(cols_pop) > 1:
+        gdf_health = gdf_health.merge(dfpopulation[cols_pop], on="health_area", how="left")
+        st.session_state.gdf_health = gdf_health
+
+    # Affichage stats
+    if "Pop_Totale" in dfpopulation.columns and dfpopulation["Pop_Totale"].notna().any():
+        col1, col2 = st.sidebar.columns(2)
+        col1.metric("👥 Pop.", f"{int(dfpopulation['Pop_Totale'].sum()):,}")
+        col2.metric("📍 Aires", f"{dfpopulation['Pop_Totale'].notna().sum()}")
+    else:
+        st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")
+
     else:
 
         # ── Option 1 : Upload utilisateur ─────────────────────
@@ -2858,6 +2953,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
