@@ -1008,7 +1008,8 @@ PAYS_ISO3_MAP = {
     "Mali":         "mli",
     "Niger":        "ner",
     "Mauritanie":   "mrt"
-}      
+}
+
 with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
 
     source_geo = st.radio(
@@ -1028,7 +1029,7 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
             key="pays_select"
         )
         iso3pays = PAYS_ISO3_MAP[pays_selectionne]
-        st.session_state["iso3pays_courant"] = iso3pays   # ← persistance
+        st.session_state["iso3pays_courant"] = iso3pays
         if st.session_state["pays_precedent"] != pays_selectionne:
             st.session_state["pays_precedent"] = pays_selectionne
             st.session_state["sa_gdf_cache"]   = None
@@ -1069,11 +1070,16 @@ with st.sidebar.expander("📍 Données Obligatoires", expanded=True):
             st.sidebar.success(f"✅ {len(gdf_health)} aires chargées")
             st.session_state["sa_gdf_cache"] = gdf_health
 
-    # Synchronisation session_state.gdf_health (utilisé dans le reste du code)
+    # Synchronisation session_state.gdf_health
     st.session_state.gdf_health = gdf_health
-# ── Chargement CSV cas hebdomadaires ──────────────────────
-st.markdown("---")
-cases_file = st.file_uploader("📊 Cas hebdomadaires (CSV)", type=["csv", "txt", "tsv"], key="cases")
+
+    # ── Chargement CSV cas hebdomadaires (TOUJOURS VISIBLE) ────
+    st.markdown("---")
+    cases_file = st.file_uploader(
+        "📊 Cas hebdomadaires (CSV)",
+        type=["csv", "txt", "tsv"],
+        key="cases"
+    )
     if cases_file:
         try:
             cases_file.seek(0)
@@ -1127,19 +1133,19 @@ cases_file = st.file_uploader("📊 Cas hebdomadaires (CSV)", type=["csv", "txt"
                     st.dataframe(df.head())
                 with st.expander("📊 Statistiques"):
                     col1, col2, col3 = st.columns(3)
-                    col1.metric("Total cas",     int(df["cases"].sum()))
-                    col2.metric("Total décès",   int(df["deaths"].sum()))
-                    col3.metric("Aires uniques",  df["health_area"].nunique())
+                    col1.metric("Total cas",    int(df["cases"].sum()))
+                    col2.metric("Total décès",  int(df["deaths"].sum()))
+                    col3.metric("Aires uniques", df["health_area"].nunique())
             else:
                 missing = required - set(df.columns)
                 st.error(f"❌ Colonnes manquantes : {missing}")
                 st.error(f"📋 Colonnes trouvées : {list(df.columns)}")
+
     # ── WorldPop — cache par pays (pattern rougeole) ──────────
     cache_key = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
     if cache_key not in st.session_state or st.session_state[cache_key] is None:
         with st.spinner("📥 Enrichissement WorldPop..."):
             dfpopulation = worldpop_malaria_stats(gdf_health, gee_ok)
-            # Calcul densité (surface en projection locale)
             gdf_m = gdf_health.to_crs("ESRI:54009")
             surf  = gdf_m.geometry.area / 1e6
             gdf_health_tmp = gdf_health.copy()
@@ -1161,23 +1167,26 @@ cases_file = st.file_uploader("📊 Cas hebdomadaires (CSV)", type=["csv", "txt"
         gdf_health = gdf_health.merge(dfpopulation[cols_pop], on="health_area", how="left")
         st.session_state.gdf_health = gdf_health
 
-    # Affichage stats
+    # Affichage stats population
     if "Pop_Totale" in dfpopulation.columns and dfpopulation["Pop_Totale"].notna().any():
         col1, col2 = st.sidebar.columns(2)
         col1.metric("👥 Pop.", f"{int(dfpopulation['Pop_Totale'].sum()):,}")
         col2.metric("📍 Aires", f"{dfpopulation['Pop_Totale'].notna().sum()}")
     else:
-        st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")   
-    
-# Récupération iso3pays hors du bloc sidebar (pour les tabs)
+        st.sidebar.warning("⚠️ WorldPop non disponible (GEE requis)")
+
+# ── Récupération iso3pays hors expander (pour les tabs) ───────────────────
 iso3pays = st.session_state.get("iso3pays_courant", None)
+
+# ============================================================
 # === API CLIMAT - MULTIPLE SOURCES ===
+# ============================================================
 with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
     use_climate_api = st.checkbox("Activer API Climat", value=False, key="use_climate_toggle")
-    
+
     if use_climate_api:
         st.markdown("### 📡 Choix de la Source")
-        
+
         api_choice = st.radio(
             "Source de données climatiques",
             ["NASA POWER", "Open-Meteo"],
@@ -1186,7 +1195,7 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             **Open-Meteo**: Excellent, gratuit, sans inscription
             """
         )
-        
+
         if api_choice == "NASA POWER":
             st.info("""
             📡 **NASA POWER**
@@ -1195,7 +1204,7 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             - ✅ Données depuis 1981
             - ⏱️ Temps de réponse : ~1-2 min
             """)
-        
+
         elif api_choice == "Open-Meteo":
             st.info("""
             📡 **Open-Meteo Archive**
@@ -1204,10 +1213,9 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
             - ✅ Données depuis 1940
             - ⚡ Très rapide (~30 sec)
             """)
-        
+
         if st.session_state.gdf_health is not None and st.session_state.df_cases is not None:
-            
-            # Année de référence
+
             year_input = st.number_input(
                 "📅 Année des données",
                 min_value=2020,
@@ -1215,50 +1223,46 @@ with st.sidebar.expander("🌦️ API Climat (Optionnel)", expanded=False):
                 value=2024,
                 help="Année correspondant aux semaines du CSV"
             )
-            
-            # Statut données existantes
+
             if st.session_state.df_climate_aggregated is not None:
                 nb_records = len(st.session_state.df_climate_aggregated)
                 st.success(f"✅ {nb_records} enregistrements climat en mémoire")
-                
+
                 df_clim = st.session_state.df_climate_aggregated
                 col1, col2, col3 = st.columns(3)
-                
+
                 if 'temp_api' in df_clim.columns:
                     col1.metric("🌡️ Temp. moy", f"{df_clim['temp_api'].mean():.1f}°C")
                 if 'precip_api' in df_clim.columns:
                     col2.metric("🌧️ Précip. moy", f"{df_clim['precip_api'].mean():.1f}mm")
                 if 'humidity_api' in df_clim.columns:
                     col3.metric("💧 Humid. moy", f"{df_clim['humidity_api'].mean():.1f}%")
-                
-                # Bouton pour réinitialiser
+
                 if st.button("🔄 Réinitialiser données climat", key="reset_climate"):
                     st.session_state.df_climate_aggregated = None
                     st.success("✅ Données climat effacées")
                     st.rerun()
             else:
                 st.info("ℹ️ Aucune donnée climat chargée")
-            
+
             if st.button("🚀 Télécharger Données Climatiques", key="download_climate", type="primary"):
                 with st.spinner(f"⏳ Téléchargement depuis {api_choice}..."):
-                    
+
                     gdf_health = st.session_state.gdf_health
-                    df_cases = st.session_state.df_cases
-                    
-                    # Bbox pour info
+                    df_cases   = st.session_state.df_cases
+
                     bounds = gdf_health.total_bounds
                     st.info(f"📍 Zone : [{bounds[1]:.2f}°W à {bounds[3]:.2f}°E, {bounds[0]:.2f}°S à {bounds[2]:.2f}°N]")
-                    
-                    # Agréger
+
                     df_climate_agg = aggregate_climate_by_week_and_area(
                         gdf_health, df_cases, year_input, api_choice
                     )
-                    
+
                     if not df_climate_agg.empty:
                         st.session_state.df_climate_aggregated = df_climate_agg
-                        st.success(f"🎉 Données climatiques intégrées avec succès !")
+                        st.success("🎉 Données climatiques intégrées avec succès !")
                     else:
-                        st.error(" Aucune donnée climatique récupérée")
+                        st.error("❌ Aucune donnée climatique récupérée")
         else:
             st.warning("⚠️ Chargez d'abord les aires de santé et les cas")
 
@@ -1336,9 +1340,10 @@ with tab1:
             cfr = (total_deaths / total_cases * 100) if total_cases > 0 else 0
             st.metric("Létalité", f"{cfr:.1f}%")
          #🔵 NOUVEAU : KPI POPULATION
+        iso3pays = st.session_state.get("iso3pays_courant", None)   # ← relecture FRAÎCHE
         cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
         if st.session_state.get(cache_key_pop) is not None and not st.session_state[cache_key_pop].empty:
-            df_pop = st.session_state[cache_key_pop]
+            df_pop = st.session_state[cache_key_pop].copy()         # ← .copy() pour isolation
             # si filtres zone appliqués
             if area_selected:
                 df_pop = df_pop[df_pop["health_area"].isin(area_selected)]
@@ -1730,9 +1735,9 @@ with tab2:
         cache_key_pop = f"enrichi_{iso3pays}" if iso3pays else "enrichi_upload"
         if st.session_state.get(cache_key_pop) is not None:
             _df_pop_raw = st.session_state[cache_key_pop]
-			_cols_to_select = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
-							   if c in _df_pop_raw.columns]
-			df_pop = _df_pop_raw[_cols_to_select].copy()
+            _cols_to_select = [c for c in ['health_area', 'Pop_Totale', 'Pop_Enfants_0_14', 'Densite_Pop']
+                               if c in _df_pop_raw.columns]
+            df_pop = _df_pop_raw[_cols_to_select].copy()
             gdf_map = gdf_map.merge(df_pop, on='health_area', how='left')
             pop_count = gdf_map['Pop_Totale'].notna().sum()
             st.info(f"✅ Population mergée: {pop_count}/{len(gdf_map)} aires")
