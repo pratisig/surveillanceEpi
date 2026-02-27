@@ -259,6 +259,12 @@ def worldpop_malaria_stats(_sa_gdf, use_gee):
     """
     Extrait population détaillée par sexe et âge (<35 ans) + totaux (WorldPop).
     """
+    # Normalisation défensive : créer 'health_area' si absent (ex: shapefile tronqué)
+    _sa_gdf = _sa_gdf.copy()
+    if "health_area" not in _sa_gdf.columns:
+        _ha_col = next((c for c in ["health_are", "name_fr", "namefr", "name", "nom", "aire_sante"]
+                        if c in _sa_gdf.columns), None)
+        _sa_gdf["health_area"] = _sa_gdf[_ha_col].astype(str).str.strip().str.lower() if _ha_col else [f"Aire{i+1}" for i in range(len(_sa_gdf))]
 
     if not use_gee:
         # Fallback vide
@@ -2832,6 +2838,7 @@ st.markdown("""
     <p>Version 1.0 | Développé avec | Python • Streamlit • GeoPandas • Scikit-learn par Youssoupha MBODJI</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
