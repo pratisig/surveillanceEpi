@@ -228,10 +228,12 @@ if option_aire == "Fichier local (ao_hlthArea.zip)":
         list(PAYS_ISO3_MAP.keys()),
         key='pays_select'
     )
-    iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
-    if st.session_state.pays_precedent != pays_selectionne:
-        st.session_state.pays_precedent = pays_selectionne
-        st.session_state.sa_gdf_cache = None
+    if option_aire == "Fichier local (ao_hlthArea.zip)" and pays_selectionne:
+        iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
+        if st.session_state.pays_precedent != pays_selectionne:
+            st.session_state.pays_precedent = pays_selectionne
+            st.session_state.sa_gdf_cache = None
+       
 iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
 # CORRECTION : on met à jour le cache SANS rerun si le pays change
 if st.session_state.pays_precedent != pays_selectionne:
@@ -1069,7 +1071,7 @@ else:
     climat_start = datetime(datetime.now().year, 1, 1)
     climat_end   = datetime.now()
 
-_cache_key = f"enrichi_{iso3_pays if iso3_pays else 'upload'}"
+_cache_key = f"enrichi_{iso3_pays if iso3_pays else (upload_file.name if upload_file else 'upload')}"
 if _cache_key not in st.session_state or st.session_state[_cache_key] is None:
     with st.spinner("🔄 Enrichissement des données..."):
         pop_df     = worldpop_children_stats(sa_gdf, gee_ok)
@@ -1648,18 +1650,6 @@ with tab2:
     # ── Affichage de la carte ── CORRECTION CLÉ : returned_objects=[]
     st_folium(m, width=1400, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
 
-    # ── Métriques synthèse ──────────────────────────────────────
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        nal = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] >= seuil_alerte_epidemique])
-        st.metric("⚠️ Aires en alerte", nal, f"{nal/len(sa_gdf)*100:.1f}%")
-    with col2:
-        nsc = len(sa_gdf_with_cases[sa_gdf_with_cases["Cas_Observes"] == 0])
-        st.metric("✅ Aires sans cas", nsc, f"{nsc/len(sa_gdf)*100:.1f}%")
-    with col3:
-        d_moy = safe_float(sa_gdf_with_cases["Densite_Pop"].mean())
-        st.metric("👥 Densité moy.", fmt_val(d_moy, "{:.1f}", " hab/km²"))
-
 
     # ── Métriques synthèse ─────────────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -1765,7 +1755,7 @@ with tab3:
         weekly_features["CoefClimatique"] = 0
 
     # Normalisation poids manuels si mode expert
-    if mode_importance == "Manuel Expert" and poids_normalises:
+    if mode_importance == "👨‍⚕️ Manuel (Expert)" and poids_normalises:
         feature_weights = np.ones(len(feature_cols) if 'feature_cols' in dir() else 1)
 
     # Colonnes features
@@ -1788,7 +1778,7 @@ with tab3:
     y = df_model["CasObserves"].values
 
     # Normalisation poids manuels si mode expert
-    if mode_importance == "Manuel Expert" and poids_normalises:
+    if mode_importance == "👨‍⚕️ Manuel (Expert)" and poids_normalises:
         feature_weights = np.ones(len(feature_cols))
         for i, feat in enumerate(feature_cols):
             if any(k in feat for k in ["Lag", "Rolling"]):
@@ -1901,13 +1891,13 @@ with tab3:
                 "RollingMean4": roll_mean, "RollingStd4": roll_std,
                 "SemaineSin": sem_sin, "SemaineCos": sem_cos,
                 "NonVaccines": non_vacc_aire, "Taux_Vaccination": taux_vacc_aire,
-                "PopEnfants": pop_enfants_aire, "Densite_Pop": densite_aire,
+                "Pop_Enfants": pop_enfants_aire, "Densite_Pop": densite_aire,
                 "UrbanEncoded": urban_enc_aire, "CoefClimatique": coef_clim_aire
             }
             X_fut = np.array([[row_feat.get(c, 0) for c in feature_cols]])
             X_fut = imputer.transform(X_fut)
 
-            if mode_importance == "Manuel Expert" and poids_normalises:
+            if mode_importance == "👨‍⚕️ Manuel (Expert)" and poids_normalises:
                 X_fut = X_fut * feature_weights
 
             cas_pred = float(max(0, model.predict(X_fut)[0]))
