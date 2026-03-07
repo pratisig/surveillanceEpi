@@ -1486,6 +1486,7 @@ with tab1:
                 st.plotly_chart(fig_pyr, use_container_width=True) 
        # Section climat
         if st.session_state.df_climate_aggregated is not None:
+            df_clim = st.session_state.df_climate_aggregated  # ✅ FIX NameError
             st.markdown("""
             <style>
             div[data-testid="stMetric"].clim-card {
