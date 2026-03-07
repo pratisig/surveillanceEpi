@@ -1070,18 +1070,31 @@ else:
     climat_end   = datetime.now()
 
 _cache_key = f"enrichi_{iso3_pays if iso3_pays else 'upload'}"
-if _cache_key not in st.session_state or st.session_state[_cache_key] is None:
+cache_val = st.session_state.get(_cache_key, None)
+
+cache_invalide = (
+    cache_val is None
+    or not isinstance(cache_val, dict)
+    or "pop" not in cache_val
+    or "urban" not in cache_val
+    or "climate" not in cache_val
+)
+
+if cache_invalide:
     with st.spinner("🔄 Enrichissement des données..."):
-        pop_df     = worldpop_children_stats(sa_gdf, gee_ok)
-        urban_df   = urban_classification(sa_gdf, gee_ok)
+        pop_df = worldpop_children_stats(sa_gdf, gee_ok)
+        urban_df = urban_classification(sa_gdf, gee_ok)
         climate_df = fetch_climate_nasa_power(sa_gdf, climat_start, climat_end)
+
         st.session_state[_cache_key] = {
-            "pop": pop_df, "urban": urban_df, "climate": climate_df
+            "pop": pop_df,
+            "urban": urban_df,
+            "climate": climate_df
         }
 else:
-    pop_df     = st.session_state[_cache_key]["pop"]
-    urban_df   = st.session_state[_cache_key]["urban"]
-    climate_df = st.session_state[_cache_key]["climate"]
+    pop_df = cache_val["pop"]
+    urban_df = cache_val["urban"]
+    climate_df = cache_val["climate"]
 
 sa_gdf_enrichi = sa_gdf.copy()
 sa_gdf_enrichi = sa_gdf_enrichi.merge(pop_df,     on="health_area", how="left")
@@ -1901,7 +1914,7 @@ with tab3:
                 "RollingMean4": roll_mean, "RollingStd4": roll_std,
                 "SemaineSin": sem_sin, "SemaineCos": sem_cos,
                 "NonVaccines": non_vacc_aire, "Taux_Vaccination": taux_vacc_aire,
-                "PopEnfants": pop_enfants_aire, "Densite_Pop": densite_aire,
+                "Pop_Enfants": pop_enfants_aire, "Densite_Pop": densite_aire,
                 "UrbanEncoded": urban_enc_aire, "CoefClimatique": coef_clim_aire
             }
             X_fut = np.array([[row_feat.get(c, 0) for c in feature_cols]])
