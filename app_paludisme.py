@@ -15,6 +15,7 @@ import folium
 from folium import Popup, Tooltip, CircleMarker, GeoJson, LayerControl, DivIcon
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
+from prediction_map_tab import create_prediction_map_tab
 import rasterio
 from rasterio.mask import mask
 import matplotlib.pyplot as plt
@@ -1319,6 +1320,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🗺️ Cartographie", 
     "🤖 Modélisation", 
     "📈 Analyse Avancée",
+   "🗺️ Carte Prédictions",
     "📥 Export"
 ])
 
@@ -2515,10 +2517,19 @@ with tab3:
                 else:
                     st.success("✅ Aucune zone au-dessus du seuil d'alerte")               
 # ============================================================
+# TAB 4 : CARTOGRAPHIE DES PRÉDICTIONS
+# ============================================================
+
+with tab4:  # Carte Prédictions
+    create_prediction_map_tab(
+        gdf_health=gdf_health, 
+        model_results=st.session_state.get('model_results')
+    )
+# ============================================================
 # TAB 4 – ANALYSE AVANCÉE (VERSION CORRIGÉE)
 # ============================================================
 
-with tab4:
+with tab5:
     st.subheader("📈 Analyse de Corrélation")
     
     if df_cases is not None and gdf_health is not None:
@@ -2803,9 +2814,9 @@ with tab4:
     else:
         st.info("ℹ️ Chargez d'abord les aires de santé et les cas pour l'analyse de corrélation")
 # ============================================================
-# TAB 5 – EXPORT
+# TAB 6 – EXPORT
 # ============================================================
-with tab5:
+with tab6:
     st.subheader("📥 Export des Données")
     
     st.markdown('''
