@@ -1742,9 +1742,10 @@ with tab3:
     weekly_features["SemaineCos"] = np.cos(2 * np.pi * weekly_features["Semaine_Epi"] / 52)
 
     # Merge variables externes par aire
-    cols_merge = ["health_area", "PopTotale", "PopEnfants", "DensitePop",
-                  "DensiteEnfants", "Urbanisation", "TemperatureMoy",
-                  "HumiditeMoy", "SaisonSecheHumidite", "TauxVaccination"]
+    cols_merge = ["health_area", "Pop_Totale", "Pop_Enfants", "Densite_Pop",
+              "Densite_Enfants", "Urbanisation", "Temperature_Moy",
+              "Humidite_Moy", "Saison_Seche_Humidite", "Taux_Vaccination"]
+
     cols_merge_dispo = [c for c in cols_merge if c in sa_gdf_enrichi.columns]
     weekly_features = weekly_features.merge(
         sa_gdf_enrichi[cols_merge_dispo],
@@ -1769,13 +1770,13 @@ with tab3:
 
     # Colonnes features
     feature_cols = [
-        "Lag1", "Lag2", "Lag3", "Lag4",
-        "RollingMean4", "RollingStd4",
-        "SemaineSin", "SemaineCos",
-        "NonVaccines", "TauxVaccination",
-        "PopEnfants", "DensitePop",
-        "UrbanEncoded", "CoefClimatique"
-    ]
+    "Lag1", "Lag2", "Lag3", "Lag4",
+    "RollingMean4", "RollingStd4",
+    "SemaineSin", "SemaineCos",
+    "NonVaccines", "Taux_Vaccination",
+    "Pop_Enfants", "Densite_Pop",
+    "UrbanEncoded", "CoefClimatique"
+]
     feature_cols = [c for c in feature_cols if c in weekly_features.columns]
 
     df_model = weekly_features.dropna(subset=["CasObserves"]).copy()
@@ -1791,7 +1792,7 @@ with tab3:
         feature_weights = np.ones(len(feature_cols))
         for i, feat in enumerate(feature_cols):
             if any(k in feat for k in ["Lag", "Rolling"]):
-                feature_weights[i] = poids_normalises.get("HistoriqueCas", 1.0) * len(feature_cols)
+                feature_weights[i] = poids_normalises.get("Historique_Cas", 1.0) * len(feature_cols)
             elif any(k in feat for k in ["Vaccination", "NonVaccines"]):
                 feature_weights[i] = poids_normalises.get("Vaccination", 1.0) * len(feature_cols)
             elif any(k in feat for k in ["Pop", "Densite"]):
@@ -1861,20 +1862,20 @@ with tab3:
         aire_meta = sa_gdf_enrichi[sa_gdf_enrichi["health_area"] == aire]
 
         if len(aire_meta) > 0:
-            pop_enfants_aire = float(aire_meta["PopEnfants"].iloc[0]) \
-                if "PopEnfants" in aire_meta.columns else np.nan
-            densite_aire = float(aire_meta["DensitePop"].iloc[0]) \
-                if "DensitePop" in aire_meta.columns else np.nan
+            pop_enfants_aire = float(aire_meta["Pop_Enfants"].iloc[0]) \
+                if "Pop_Enfants" in aire_meta.columns else np.nan
+            densite_aire = float(aire_meta["Densite_Pop"].iloc[0]) \
+                if "Densite_Pop" in aire_meta.columns else np.nan
             try:
                 urban_enc_aire = le_urban.transform(
                     [str(aire_meta["Urbanisation"].iloc[0])])[0] \
                     if "Urbanisation" in aire_meta.columns else 0
             except ValueError:
                 urban_enc_aire = 0
-            taux_vacc_aire = float(aire_meta["TauxVaccination"].iloc[0]) \
-                if "TauxVaccination" in aire_meta.columns else np.nan
-            coef_clim_aire = float(aire_meta["HumiditeMoy"].iloc[0]) * 0.5 \
-                if "HumiditeMoy" in aire_meta.columns else 0
+            taux_vacc_aire = float(aire_meta["Taux_Vaccination"].iloc[0]) \
+                if "Taux_Vaccination" in aire_meta.columns else np.nan
+            coef_clim_aire = float(aire_meta["Humidite_Moy"].iloc[0]) * 0.5 \
+                if "Humidite_Moy" in aire_meta.columns else 0
             non_vacc_aire = float(aire_hist["NonVaccines"].mean()) if len(aire_hist) > 0 else 0
         else:
             pop_enfants_aire = densite_aire = taux_vacc_aire = np.nan
@@ -1899,8 +1900,8 @@ with tab3:
                 "Lag1": lag1, "Lag2": lag2, "Lag3": lag3, "Lag4": lag4,
                 "RollingMean4": roll_mean, "RollingStd4": roll_std,
                 "SemaineSin": sem_sin, "SemaineCos": sem_cos,
-                "NonVaccines": non_vacc_aire, "TauxVaccination": taux_vacc_aire,
-                "PopEnfants": pop_enfants_aire, "DensitePop": densite_aire,
+                "NonVaccines": non_vacc_aire, "Taux_Vaccination": taux_vacc_aire,
+                "PopEnfants": pop_enfants_aire, "Densite_Pop": densite_aire,
                 "UrbanEncoded": urban_enc_aire, "CoefClimatique": coef_clim_aire
             }
             X_fut = np.array([[row_feat.get(c, 0) for c in feature_cols]])
