@@ -1822,7 +1822,7 @@ with tab2:
             show_rivers = st.checkbox("Rivières", value=False)
 
         # Initialiser carte
-        center = gdfmap.geometry.union_all().centroid
+        center = gdf_map.geometry.union_all().centroid
         m = folium.Map(location=[center.y, center.x], zoom_start=8, tiles="CartoDB positron")
 
         # Ajouter rasters
