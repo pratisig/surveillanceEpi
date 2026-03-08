@@ -1697,7 +1697,7 @@ with tab2:
                 )
                 
                 if not gdf_climate[climate_var].isna().all():
-                    center = gdf_climate.geometry.unary_union.centroid
+                    center = gdfclimate.geometry.union_all().centroid
                     
                     m_climate = folium.Map(
                         location=[center.y, center.x],
@@ -1822,7 +1822,7 @@ with tab2:
             show_rivers = st.checkbox("Rivières", value=False)
 
         # Initialiser carte
-        center = gdf_map.geometry.unary_union.centroid
+        center = gdfmap.geometry.union_all().centroid
         m = folium.Map(location=[center.y, center.x], zoom_start=8, tiles="CartoDB positron")
 
         # Ajouter rasters
@@ -2488,7 +2488,7 @@ with tab3:
                     color_continuous_scale='Reds', title="Top 15 Aires à Risque"
                 )
                 fig.update_layout(height=600)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 # Après la heatmap (ligne ~1580)
                 st.markdown("---")
                 st.markdown("### 🚨 Zones à Risque Élevé")
