@@ -1597,6 +1597,51 @@ with tab2:
                     "Temperature_Moy", "Humidite_Moy", "geometry"]
     _cols_folium = [c for c in _cols_folium if c in sa_gdf_carte.columns]
     sa_gdf_folium = sa_gdf_carte[_cols_folium].copy()
+    # ── Popup HTML enrichi avec icônes ──────────────────────────
+    def _make_popup_html(row):
+        cas = int(row.get("Cas_Observes", 0) or 0)
+        aire = str(row.get("health_area", "N/A"))
+        color_h = "#c62828" if cas >= seuil_alerte_epidemique else "#2e7d32"
+    
+        def _f(val, fmt="{:.1f}", suffix="", fallback="N/A"):
+            try:
+                f = float(val)
+                return fallback if (np.isnan(f) or np.isinf(f)) else fmt.format(f) + suffix
+            except:
+                return fallback
+    
+        lignes = f"""
+        <tr style="background:#fff3e0;">
+            <td>🦠 <b>Cas observés</b></td>
+            <td><b style="color:{color_h};font-size:15px;">{cas}</b></td></tr>
+        <tr><td>📊 Taux attaque /10k</td>
+            <td><b>{_f(row.get("Taux_Attaque_10000"), "{:.1f}")}</b></td></tr>
+        <tr style="background:#f5f5f5;"><td>👥 Pop. totale</td>
+            <td>{_f(row.get("Pop_Totale"), "{:,.0f}")}</td></tr>
+        <tr><td>👶 Enfants 0-14 ans</td>
+            <td>{_f(row.get("Pop_Enfants"), "{:,.0f}")}</td></tr>
+        <tr style="background:#f5f5f5;"><td>💉 Vaccination</td>
+            <td>{_f(row.get("Taux_Vaccination"), "{:.1f}", "%")}</td></tr>
+        <tr><td>🏙️ Habitat</td>
+            <td>{str(row.get("Urbanisation", "N/A"))}</td></tr>
+        <tr style="background:#f5f5f5;"><td>🌡️ Température moy.</td>
+            <td>{_f(row.get("Temperature_Moy"), "{:.1f}", " °C")}</td></tr>
+        <tr><td>💧 Humidité moy.</td>
+            <td>{_f(row.get("Humidite_Moy"), "{:.1f}", " %")}</td></tr>
+        """
+        return f"""
+        <div style="font-family:Arial,sans-serif;min-width:260px;max-width:340px;">
+          <div style="background:{color_h};color:white;padding:8px 12px;
+                      border-radius:6px 6px 0 0;font-size:14px;">
+            🏥 <b>{aire}</b>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <colgroup><col style="width:58%"><col style="width:42%"></colgroup>
+            {lignes}
+          </table>
+        </div>"""
+    
+    sa_gdf_folium["_popup_html"] = sa_gdf_folium.apply(_make_popup_html, axis=1)
     # ── Sérialisation JSON explicite — compatible upload ET fichier local ──
     import json as _json
     try:
@@ -1644,10 +1689,10 @@ with tab2:
             style="font-family:Arial;font-size:13px;",
         ),
         popup=folium.GeoJsonPopup(
-            fields=_pop_fields,
-            aliases=_pop_aliases,
-            max_width=400,
-        ),
+        fields=["_popup_html"],
+        labels=False,
+        max_width=400,
+    ),
     ).add_to(m)
 
     
