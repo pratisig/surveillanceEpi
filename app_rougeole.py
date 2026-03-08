@@ -1766,6 +1766,11 @@ with tab3:
     feature_cols = [c for c in feature_cols if c in weekly_features.columns]
 
     df_model = weekly_features.dropna(subset=["CasObserves"]).copy()
+    if len(df_model) < 10:
+        st.error("❌ Données insuffisantes pour entraîner le modèle "
+                 f"(seulement {len(df_model)} lignes valides). "
+                 "Réduisez les filtres temporels ou utilisez le mode démo.")
+        st.stop()
     for col in feature_cols:
         df_model[col] = pd.to_numeric(df_model[col], errors="coerce")
 
@@ -1905,13 +1910,16 @@ with tab3:
             recent_cases.append(cas_pred)
             recent_cases = recent_cases[-4:]
 
-    if futures_rows:
-        toutes_cles = set()
-        for r in futures_rows:
-            toutes_cles.update(r.keys())
-        futures_rows = [{k: r.get(k, np.nan) for k in toutes_cles} for r in futures_rows]
-    
+    if not futures_rows:
+        st.error("❌ Aucune prédiction générée. Vérifiez que les données contiennent "
+                 "suffisamment de semaines (minimum 4) par aire de santé.")
+        st.stop()
+
     future_df = pd.DataFrame(futures_rows)
+    # Colonnes attendues
+    for col in ["Aire_Sante", "SemaineLabel", "SemaineEpi", "Annee", "sort_key", "CasPredits"]:
+        if col not in future_df.columns:
+            future_df[col] = np.nan
 
     # ── Courbe épidémique avec prédictions ─────────────────────
     st.subheader("📈 Courbe Épidémique avec Prédictions")
