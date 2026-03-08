@@ -2487,7 +2487,7 @@ with tab3:
                     x=[f"S{c}" for c in pivot.columns], y=pivot.index,
                     color_continuous_scale='Reds', title="Top 15 Aires à Risque"
                 )
-                fig.update_layout(height=600)
+                fig.update_layout(height=700, width=None)
                 st.plotly_chart(fig, width='stretch')
                 # Après la heatmap (ligne ~1580)
                 st.markdown("---")
