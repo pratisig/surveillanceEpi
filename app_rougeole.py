@@ -86,6 +86,8 @@ if 'enrichi_mrt' not in st.session_state:
     st.session_state['enrichi_mrt'] = None
 if 'enrichi_upload' not in st.session_state:
     st.session_state['enrichi_upload'] = None
+if 'upload_file_name_cache' not in st.session_state:
+    st.session_state['upload_file_name_cache'] = None
 # ============================================================
 # CORRECTION 1 & 2 : MAPPING COLONNES ROBUSTE + SÉPARATEUR CSV
 # ============================================================
@@ -448,7 +450,15 @@ def load_shapefile_from_upload(upload_file):
 # ============================================================
 
 # Chargement des aires de santé
-if st.session_state.sa_gdf_cache is not None and option_aire == "Fichier local (ao_hlthArea.zip)":
+_current_upload_name = upload_file.name if upload_file is not None else None
+_cache_valide = (
+    st.session_state.sa_gdf_cache is not None and (
+        option_aire == "Fichier local (ao_hlthArea.zip)" or
+        (option_aire == "Upload personnalisé" and
+         st.session_state.get("upload_file_name_cache") == _current_upload_name)
+    )
+)
+if _cache_valide:
     sa_gdf = st.session_state.sa_gdf_cache
     st.sidebar.success(f"✓ {len(sa_gdf)} aires chargées (cache)")
 else:
@@ -478,6 +488,7 @@ else:
                 else:
                     st.sidebar.success(f"✓ {len(sa_gdf)} aires chargées")
                     st.session_state.sa_gdf_cache = sa_gdf
+                    st.session_state["upload_file_name_cache"] = upload_file.name
 
 if sa_gdf is None or sa_gdf.empty:
     st.error("❌ Aucune aire chargée")
@@ -1587,31 +1598,59 @@ with tab2:
     _cols_folium = [c for c in _cols_folium if c in sa_gdf_carte.columns]
     sa_gdf_folium = sa_gdf_carte[_cols_folium].copy()
 
-    folium.GeoJson(
-        sa_gdf_folium,
-        style_function=_style_func,
-        tooltip=folium.GeoJsonTooltip(
-            fields=["health_area", "Cas_Observes", "Taux_Attaque_10000",
-                    "Pop_Enfants", "Urbanisation", "Taux_Vaccination"],
-            aliases=["Aire :", "Cas :", "Tx attaque /10k :",
-                     "Enfants 0-14 :", "Habitat :", "Vaccination % :"],
-            localize=True,
-            sticky=True,
-            labels=True,
-            style="font-family:Arial;font-size:13px;",
-        ),
-        popup=folium.GeoJsonPopup(
-            fields=["health_area", "Cas_Observes", "Taux_Attaque_10000",
-                    "Pop_Totale", "Pop_Enfants", "Densite_Pop",
-                    "Urbanisation", "Taux_Vaccination",
-                    "Temperature_Moy", "Humidite_Moy"],
-            aliases=["Aire de santé", "Cas observés", "Taux attaque /10 000 enf.",
-                     "Pop. totale", "Enfants 0-14 ans", "Densité (hab/km²)",
-                     "Habitat", "Taux vaccination (%)",
-                     "Température moy. (°C)", "Humidité moy. (%)"],
-            max_width=400,
-        ),
-    ).add_to(m)
+        # ── Sérialisation JSON explicite — compatible upload ET fichier local ──
+        import json as _json
+        try:
+            _geojson_data = _json.loads(sa_gdf_folium.to_json())
+        except Exception as _e:
+            st.warning(f"⚠️ Erreur sérialisation GeoJSON : {_e}")
+            _geojson_data = _json.loads(sa_gdf_folium[["health_area", "geometry"]].to_json())
+    
+        # Filtrage défensif : on garde uniquement les champs qui existent vraiment
+        _tooltip_candidates = [
+            ("health_area",        "Aire :"),
+            ("Cas_Observes",       "Cas :"),
+            ("Taux_Attaque_10000", "Taux /10k :"),
+            ("Pop_Enfants",        "Enfants 0-14 :"),
+            ("Urbanisation",       "Habitat :"),
+            ("Taux_Vaccination",   "Vaccination % :"),
+        ]
+        _popup_candidates = [
+            ("health_area",        "Aire de santé"),
+            ("Cas_Observes",       "Cas observés"),
+            ("Taux_Attaque_10000", "Taux attaque /10 000 enf."),
+            ("Pop_Totale",         "Pop. totale"),
+            ("Pop_Enfants",        "Enfants 0-14 ans"),
+            ("Densite_Pop",        "Densité (hab/km²)"),
+            ("Urbanisation",       "Habitat"),
+            ("Taux_Vaccination",   "Vaccination (%)"),
+            ("Temperature_Moy",    "Température moy. (°C)"),
+            ("Humidite_Moy",       "Humidité moy. (%)"),
+        ]
+        _existing_cols = list(sa_gdf_folium.columns)
+        _tt_fields   = [f for f, _ in _tooltip_candidates if f in _existing_cols]
+        _tt_aliases  = [a for f, a in _tooltip_candidates if f in _existing_cols]
+        _pop_fields  = [f for f, _ in _popup_candidates  if f in _existing_cols]
+        _pop_aliases = [a for f, a in _popup_candidates  if f in _existing_cols]
+    
+        folium.GeoJson(
+            _geojson_data,
+            style_function=_style_func,
+            tooltip=folium.GeoJsonTooltip(
+                fields=_tt_fields,
+                aliases=_tt_aliases,
+                localize=True,
+                sticky=True,
+                labels=True,
+                style="font-family:Arial;font-size:13px;",
+            ),
+            popup=folium.GeoJsonPopup(
+                fields=_pop_fields,
+                aliases=_pop_aliases,
+                max_width=400,
+            ),
+        ).add_to(m)
+
 
 
         # ── HeatMap ─────────────────────────────────────────────────
