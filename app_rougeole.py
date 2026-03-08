@@ -1597,61 +1597,61 @@ with tab2:
                     "Temperature_Moy", "Humidite_Moy", "geometry"]
     _cols_folium = [c for c in _cols_folium if c in sa_gdf_carte.columns]
     sa_gdf_folium = sa_gdf_carte[_cols_folium].copy()
+    # ── Sérialisation JSON explicite — compatible upload ET fichier local ──
+    import json as _json
+    try:
+        _geojson_data = _json.loads(sa_gdf_folium.to_json())
+    except Exception as _e:
+        st.warning(f"⚠️ Erreur sérialisation GeoJSON : {_e}")
+        _geojson_data = _json.loads(sa_gdf_folium[["health_area", "geometry"]].to_json())
 
-        # ── Sérialisation JSON explicite — compatible upload ET fichier local ──
-        import json as _json
-        try:
-            _geojson_data = _json.loads(sa_gdf_folium.to_json())
-        except Exception as _e:
-            st.warning(f"⚠️ Erreur sérialisation GeoJSON : {_e}")
-            _geojson_data = _json.loads(sa_gdf_folium[["health_area", "geometry"]].to_json())
+    # Filtrage défensif : on garde uniquement les champs qui existent vraiment
+    _tooltip_candidates = [
+        ("health_area",        "Aire :"),
+        ("Cas_Observes",       "Cas :"),
+        ("Taux_Attaque_10000", "Taux /10k :"),
+        ("Pop_Enfants",        "Enfants 0-14 :"),
+        ("Urbanisation",       "Habitat :"),
+        ("Taux_Vaccination",   "Vaccination % :"),
+    ]
+    _popup_candidates = [
+        ("health_area",        "Aire de santé"),
+        ("Cas_Observes",       "Cas observés"),
+        ("Taux_Attaque_10000", "Taux attaque /10 000 enf."),
+        ("Pop_Totale",         "Pop. totale"),
+        ("Pop_Enfants",        "Enfants 0-14 ans"),
+        ("Densite_Pop",        "Densité (hab/km²)"),
+        ("Urbanisation",       "Habitat"),
+        ("Taux_Vaccination",   "Vaccination (%)"),
+        ("Temperature_Moy",    "Température moy. (°C)"),
+        ("Humidite_Moy",       "Humidité moy. (%)"),
+    ]
+    _existing_cols = list(sa_gdf_folium.columns)
+    _tt_fields   = [f for f, _ in _tooltip_candidates if f in _existing_cols]
+    _tt_aliases  = [a for f, a in _tooltip_candidates if f in _existing_cols]
+    _pop_fields  = [f for f, _ in _popup_candidates  if f in _existing_cols]
+    _pop_aliases = [a for f, a in _popup_candidates  if f in _existing_cols]
+
+    folium.GeoJson(
+        _geojson_data,
+        style_function=_style_func,
+        tooltip=folium.GeoJsonTooltip(
+            fields=_tt_fields,
+            aliases=_tt_aliases,
+            localize=True,
+            sticky=True,
+            labels=True,
+            style="font-family:Arial;font-size:13px;",
+        ),
+        popup=folium.GeoJsonPopup(
+            fields=_pop_fields,
+            aliases=_pop_aliases,
+            max_width=400,
+        ),
+    ).add_to(m)
     
-        # Filtrage défensif : on garde uniquement les champs qui existent vraiment
-        _tooltip_candidates = [
-            ("health_area",        "Aire :"),
-            ("Cas_Observes",       "Cas :"),
-            ("Taux_Attaque_10000", "Taux /10k :"),
-            ("Pop_Enfants",        "Enfants 0-14 :"),
-            ("Urbanisation",       "Habitat :"),
-            ("Taux_Vaccination",   "Vaccination % :"),
-        ]
-        _popup_candidates = [
-            ("health_area",        "Aire de santé"),
-            ("Cas_Observes",       "Cas observés"),
-            ("Taux_Attaque_10000", "Taux attaque /10 000 enf."),
-            ("Pop_Totale",         "Pop. totale"),
-            ("Pop_Enfants",        "Enfants 0-14 ans"),
-            ("Densite_Pop",        "Densité (hab/km²)"),
-            ("Urbanisation",       "Habitat"),
-            ("Taux_Vaccination",   "Vaccination (%)"),
-            ("Temperature_Moy",    "Température moy. (°C)"),
-            ("Humidite_Moy",       "Humidité moy. (%)"),
-        ]
-        _existing_cols = list(sa_gdf_folium.columns)
-        _tt_fields   = [f for f, _ in _tooltip_candidates if f in _existing_cols]
-        _tt_aliases  = [a for f, a in _tooltip_candidates if f in _existing_cols]
-        _pop_fields  = [f for f, _ in _popup_candidates  if f in _existing_cols]
-        _pop_aliases = [a for f, a in _popup_candidates  if f in _existing_cols]
-    
-        folium.GeoJson(
-            _geojson_data,
-            style_function=_style_func,
-            tooltip=folium.GeoJsonTooltip(
-                fields=_tt_fields,
-                aliases=_tt_aliases,
-                localize=True,
-                sticky=True,
-                labels=True,
-                style="font-family:Arial;font-size:13px;",
-            ),
-            popup=folium.GeoJsonPopup(
-                fields=_pop_fields,
-                aliases=_pop_aliases,
-                max_width=400,
-            ),
-        ).add_to(m)
 
-
+        
 
         # ── HeatMap ─────────────────────────────────────────────────
     heat_data = []
