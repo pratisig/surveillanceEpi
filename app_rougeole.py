@@ -1596,6 +1596,7 @@ with tab2:
                     "Urbanisation", "Taux_Vaccination",
                     "Temperature_Moy", "Humidite_Moy", "geometry"]
     _cols_folium = [c for c in _cols_folium if c in sa_gdf_carte.columns]
+    sa_gdf_folium = sa_gdf_carte[_cols_folium].copy()
     # ── Sérialisation JSON explicite — compatible upload ET fichier local ──
     import json as _json
     try:
