@@ -16,18 +16,37 @@ def create_prediction_map_tab(gdf_health, model_results):
     
     Args:
         gdf_health: GeoDataFrame des aires de santé
-        model_results: Dictionnaire contenant 'df_predictions' et 'model_info'
+        model_results: Dictionnaire contenant 'df_future' et 'model_info'
     """
     
     st.markdown("### 🗺️ Cartographie des Prédictions")
     st.info("📍 Carte interactive des cas prédits avec popups détaillés par aire de santé")
     
-    if model_results is None or 'df_predictions' not in model_results:
+    if model_results is None or 'df_future' not in model_results:
         st.warning("⚠️ Aucune prédiction disponible. Veuillez d'abord exécuter la modélisation.")
         return
     
-    df_pred = model_results['df_predictions'].copy()
+    df_pred = model_results['df_future'].copy()
+    # ── Normalisation des noms de colonnes ──────────────────────
+    if 'week_num' not in df_pred.columns and 'weeknum' in df_pred.columns:
+        df_pred = df_pred.rename(columns={'weeknum': 'week_num'})
     
+    if 'predicted_cases' not in df_pred.columns and 'predictedcases' in df_pred.columns:
+        df_pred = df_pred.rename(columns={'predictedcases': 'predicted_cases'})
+    
+    if 'health_area' not in df_pred.columns:
+        for candidate in ['healtharea', 'Aire_Sante', 'aire_sante', 'area', 'name']:
+            if candidate in df_pred.columns:
+                df_pred = df_pred.rename(columns={candidate: 'health_area'})
+                break
+    
+    # ── Vérification de sécurité ────────────────────────────────
+    required_cols = ['health_area', 'week_num', 'predicted_cases']
+    missing = [c for c in required_cols if c not in df_pred.columns]
+    if missing:
+        st.error(f"❌ Colonnes manquantes dans les prédictions : {missing}")
+        st.write("Colonnes disponibles :", list(df_pred.columns))
+        return
     # ============================================================
     # CONFIGURATION UTILISATEUR
     # ============================================================
@@ -35,7 +54,7 @@ def create_prediction_map_tab(gdf_health, model_results):
     col1, col2, col3 = st.columns([2, 2, 2])
     
     with col1:
-        weeks_available = sorted(df_pred['week_num'].unique())
+        weeks_available = sorted(df_pred['weeknum '].unique())
         selected_week = st.selectbox(
             "📅 Semaine à visualiser",
             weeks_available,
@@ -64,7 +83,7 @@ def create_prediction_map_tab(gdf_health, model_results):
     # PRÉPARATION DES DONNÉES
     # ============================================================
     
-    df_week = df_pred[df_pred['week_num'] == selected_week].copy()
+    df_week = df_pred[df_pred['weeknum '] == selected_week].copy()
     
     if df_week.empty:
         st.error(f"❌ Aucune prédiction pour la semaine {selected_week}")
