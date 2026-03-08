@@ -1319,8 +1319,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Dashboard", 
     "🗺️ Cartographie", 
     "🤖 Modélisation", 
-    "📈 Analyse Avancée",
    "🗺️ Carte Prédictions",
+   "📈 Analyse Avancée",
     "📥 Export"
 ])
 
