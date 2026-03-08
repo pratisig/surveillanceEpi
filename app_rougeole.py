@@ -230,15 +230,9 @@ if option_aire == "Fichier local (ao_hlthArea.zip)":
     )
     if option_aire == "Fichier local (ao_hlthArea.zip)" and pays_selectionne:
         iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
-        if st.session_state.pays_precedent != pays_selectionne:
-            st.session_state.pays_precedent = pays_selectionne
-            st.session_state.sa_gdf_cache = None
-       
-iso3_pays = PAYS_ISO3_MAP[pays_selectionne]
-# CORRECTION : on met à jour le cache SANS rerun si le pays change
-if st.session_state.pays_precedent != pays_selectionne:
-    st.session_state.pays_precedent = pays_selectionne
-    st.session_state.sa_gdf_cache = None
+    if st.session_state.pays_precedent != pays_selectionne:
+        st.session_state.pays_precedent = pays_selectionne
+        st.session_state.sa_gdf_cache = None
 
 upload_file = None
 if option_aire == "Upload personnalisé":
@@ -1748,15 +1742,12 @@ with tab3:
     weekly_features["UrbanEncoded"] = le_urban.fit_transform(weekly_features["Urbanisation"])
 
     # Coefficient climatique
-    if "HumiditeMoy" in weekly_features.columns:
+    if "Humidite_Moy" in weekly_features.columns:
         weekly_features["CoefClimatique"] = pd.to_numeric(
-            weekly_features["HumiditeMoy"], errors="coerce").fillna(0) * 0.5
+            weekly_features["Humidite_Moy"], errors="coerce").fillna(0) * 0.5
     else:
         weekly_features["CoefClimatique"] = 0
 
-    # Normalisation poids manuels si mode expert
-    if mode_importance == "👨‍⚕️ Manuel (Expert)" and poids_normalises:
-        feature_weights = np.ones(len(feature_cols) if 'feature_cols' in dir() else 1)
 
     # Colonnes features
     feature_cols = [
