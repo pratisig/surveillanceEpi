@@ -1,6 +1,5 @@
 # ============================================================
 # APP SURVEILLANCE & PRÉDICTION ROUGEOLE - VERSION 3.0
-# PARTIE 1/5 - IMPORTS, CONFIGURATION, SIDEBAR
 # ============================================================
 import streamlit as st
 import pandas as pd
@@ -1834,13 +1833,28 @@ with tab3:
     # ── Importance des variables ───────────────────────────────
     if hasattr(model, "feature_importances_"):
         st.subheader("🔍 Importance des Variables")
+    
+        # IMPORTANT: SimpleImputer peut supprimer des colonnes 100% NaN,
+        # donc il faut récupérer les features réellement utilisées.
+        try:
+            feature_cols_used = list(imputer.get_feature_names_out(feature_cols))
+        except Exception:
+            feature_cols_used = feature_cols
+    
+        # Sécurisation finale si jamais longueurs différentes
+        n_imp = len(model.feature_importances_)
+        feature_cols_used = feature_cols_used[:n_imp]
+    
         imp_df = pd.DataFrame({
-            "Variable": feature_cols,
+            "Variable": feature_cols_used,
             "Importance": model.feature_importances_
         }).sort_values("Importance", ascending=True)
-        fig_imp = px.bar(imp_df, x="Importance", y="Variable", orientation="h",
-                         title="Importance des variables — modèle ML",
-                         color="Importance", color_continuous_scale="Blues")
+    
+        fig_imp = px.bar(
+            imp_df, x="Importance", y="Variable", orientation="h",
+            title="Importance des variables — modèle ML",
+            color="Importance", color_continuous_scale="Blues"
+        )
         st.plotly_chart(fig_imp, use_container_width=True)
 
     # ── Génération des prédictions futures ─────────────────────
