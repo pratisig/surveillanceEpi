@@ -1548,7 +1548,12 @@ with tab2:
     colormap.add_to(m)
 
     # ── Ajout des polygones ─────────────────────────────────────
-    for _, row in sa_gdf_with_cases.iterrows():
+    sa_gdf_carte = sa_gdf_with_cases[
+        sa_gdf_with_cases.geometry.notna() &
+        sa_gdf_with_cases.geometry.apply(lambda g: g is not None and not g.is_empty)
+    ].copy()
+    
+    for _, row in sa_gdf_carte.iterrows():
         aire_name    = str(row.get("health_area", "N/A"))
         cas_obs      = safe_int(row.get("Cas_Observes"), 0)
         pop_enfants  = safe_float(row.get("Pop_Enfants", np.nan))
@@ -1618,7 +1623,7 @@ with tab2:
     # ── HeatMap ─────────────────────────────────────────────────
     heat_data = [
         [float(r.geometry.centroid.y), float(r.geometry.centroid.x), float(r["Cas_Observes"])]
-        for _, r in sa_gdf_with_cases.iterrows()
+        for _, r in sa_gdf_carte.iterrows()
         if safe_int(r.get("Cas_Observes"), 0) > 0 and r.geometry is not None
     ]
     if heat_data:
@@ -1900,6 +1905,12 @@ with tab3:
             recent_cases.append(cas_pred)
             recent_cases = recent_cases[-4:]
 
+    if futures_rows:
+        toutes_cles = set()
+        for r in futures_rows:
+            toutes_cles.update(r.keys())
+        futures_rows = [{k: r.get(k, np.nan) for k in toutes_cles} for r in futures_rows]
+    
     future_df = pd.DataFrame(futures_rows)
 
     # ── Courbe épidémique avec prédictions ─────────────────────
