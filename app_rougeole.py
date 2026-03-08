@@ -1619,19 +1619,17 @@ with tab2:
         except Exception:
             continue
 
-    # ── HeatMap ─────────────────────────────────────────────────
+        # ── HeatMap ─────────────────────────────────────────────────
     heat_data = []
     for _, r in sa_gdf_with_cases.iterrows():
         try:
             cas = safe_int(r.get("Cas_Observes"), 0)
             geom = r.get("geometry")
-            # Filtrage stricte pour empêcher le crash Javascript "NaN"
-            if cas > 0 and geom is not None:
-                if hasattr(geom, "is_empty") and not geom.is_empty:
-                    y = float(geom.centroid.y)
-                    x = float(geom.centroid.x)
-                    if not (np.isnan(y) or np.isnan(x)):
-                        heat_data.append([y, x, float(cas)])
+            if cas > 0 and geom is not None and hasattr(geom, 'is_valid') and geom.is_valid and not geom.is_empty:
+                y = float(geom.centroid.y)
+                x = float(geom.centroid.x)
+                if not (np.isnan(y) or np.isnan(x) or np.isinf(y) or np.isinf(x)):
+                    heat_data.append([y, x, float(cas)])
         except Exception:
             pass
 
@@ -1655,9 +1653,9 @@ with tab2:
     </div>"""
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # ── Affichage de la carte ── 
-    # Remplacement de width=1400 par use_container_width=True pour contourner le bug des tabs Streamlit
+    # ── Affichage de la carte ── CORRECTION CLÉ 
     st_folium(m, use_container_width=True, height=650, key="carte_situation_actuelle_rougeole", returned_objects=[])
+
 
     # ── Métriques synthèse ─────────────────────────────────────
     col1, col2, col3 = st.columns(3)
