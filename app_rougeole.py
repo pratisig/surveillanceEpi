@@ -1557,149 +1557,99 @@ with tab2:
     )
     colormap.add_to(m)
 
-        # ── Ajout des polygones (UNE SEULE couche GeoJson) ─────────
-    sa_gdf_carte = sa_gdf_with_cases[
-        sa_gdf_with_cases.geometry.notna() &
-        sa_gdf_with_cases.geometry.apply(lambda g: g is not None and not g.is_empty and g.is_valid)
-    ].copy()
+        # ── Ajout des polygones row-by-row avec popup HTML enrichi ─
+    for _, row in sa_gdf_with_cases.iterrows():
+        aire_name    = str(row.get("health_area", "N/A"))
+        cas_obs      = safe_int(row.get("Cas_Observes"), 0)
+        pop_enfants  = safe_float(row.get("Pop_Enfants", np.nan))
+        pop_totale   = safe_float(row.get("Pop_Totale", np.nan))
+        taux_attaque = safe_float(row.get("Taux_Attaque_10000", np.nan))
+        urbanisation = str(row.get("Urbanisation","N/A")) if pd.notna(row.get("Urbanisation")) else "N/A"
+        densite      = safe_float(row.get("Densite_Pop", np.nan))
+        taux_vacc    = safe_float(row.get("Taux_Vaccination", np.nan))
+        temp_moy     = safe_float(row.get("Temperature_Moy", np.nan))
+        hum_moy      = safe_float(row.get("Humidite_Moy", np.nan))
 
-    # Préparer les colonnes numériques pour éviter les erreurs de sérialisation
-    for _col in ["Cas_Observes", "Pop_Totale", "Pop_Enfants",
-                 "Taux_Attaque_10000", "Densite_Pop",
-                 "Taux_Vaccination", "Temperature_Moy", "Humidite_Moy"]:
-        if _col in sa_gdf_carte.columns:
-            sa_gdf_carte[_col] = pd.to_numeric(sa_gdf_carte[_col], errors="coerce").fillna(0).round(2)
-        else:
-            sa_gdf_carte[_col] = 0.0
-    sa_gdf_carte["Urbanisation"] = sa_gdf_carte.get("Urbanisation", pd.Series("N/A", index=sa_gdf_carte.index)).fillna("N/A").astype(str)
+        fill_color  = colormap(min(cas_obs, max_cases))
+        line_color  = "#b71c1c" if cas_obs >= seuil_alerte_epidemique else "#555555"
+        line_weight = 2.5       if cas_obs >= seuil_alerte_epidemique else 0.5
 
-    # Dict pour style rapide sans re-parcourir le GDF
-    _cas_dict = dict(zip(
-        sa_gdf_carte["health_area"].astype(str),
-        sa_gdf_carte["Cas_Observes"].astype(float)
-    ))
+        badge = (
+            '<span style="background:#d32f2f;color:white;padding:2px 8px;'
+            'border-radius:10px;font-size:11px;">⚠️ ALERTE</span>'
+            if cas_obs >= seuil_alerte_epidemique else ""
+        )
 
-    def _style_func(feature):
-        aire = str(feature["properties"].get("health_area", ""))
-        cas  = float(_cas_dict.get(aire, 0))
-        return {
-            "fillColor":   colormap(min(cas, max_cases)),
-            "color":       "#b71c1c" if cas >= seuil_alerte_epidemique else "#555555",
-            "weight":       2.5      if cas >= seuil_alerte_epidemique else 0.5,
-            "fillOpacity": 0.7,
-            "opacity":     0.9,
-        }
-
-    # GeoDataFrame allégé (seules les colonnes utiles à folium)
-    _cols_folium = ["health_area", "Cas_Observes", "Taux_Attaque_10000",
-                    "Pop_Totale", "Pop_Enfants", "Densite_Pop",
-                    "Urbanisation", "Taux_Vaccination",
-                    "Temperature_Moy", "Humidite_Moy", "geometry"]
-    _cols_folium = [c for c in _cols_folium if c in sa_gdf_carte.columns]
-    sa_gdf_folium = sa_gdf_carte[_cols_folium].copy()
-    # ── Popup HTML enrichi avec icônes ──────────────────────────
-    def _make_popup_html(row):
-        cas = int(row.get("Cas_Observes", 0) or 0)
-        aire = str(row.get("health_area", "N/A"))
-        color_h = "#c62828" if cas >= seuil_alerte_epidemique else "#2e7d32"
-    
-        def _f(val, fmt="{:.1f}", suffix="", fallback="N/A"):
-            try:
-                f = float(val)
-                return fallback if (np.isnan(f) or np.isinf(f)) else fmt.format(f) + suffix
-            except:
-                return fallback
-    
-        lignes = f"""
-        <tr style="background:#fff3e0;">
-            <td>🦠 <b>Cas observés</b></td>
-            <td><b style="color:{color_h};font-size:15px;">{cas}</b></td></tr>
-        <tr><td>📊 Taux attaque /10k</td>
-            <td><b>{_f(row.get("Taux_Attaque_10000"), "{:.1f}")}</b></td></tr>
-        <tr style="background:#f5f5f5;"><td>👥 Pop. totale</td>
-            <td>{_f(row.get("Pop_Totale"), "{:,.0f}")}</td></tr>
-        <tr><td>👶 Enfants 0-14 ans</td>
-            <td>{_f(row.get("Pop_Enfants"), "{:,.0f}")}</td></tr>
-        <tr style="background:#f5f5f5;"><td>💉 Vaccination</td>
-            <td>{_f(row.get("Taux_Vaccination"), "{:.1f}", "%")}</td></tr>
-        <tr><td>🏙️ Habitat</td>
-            <td>{str(row.get("Urbanisation", "N/A"))}</td></tr>
-        <tr style="background:#f5f5f5;"><td>🌡️ Température moy.</td>
-            <td>{_f(row.get("Temperature_Moy"), "{:.1f}", " °C")}</td></tr>
-        <tr><td>💧 Humidité moy.</td>
-            <td>{_f(row.get("Humidite_Moy"), "{:.1f}", " %")}</td></tr>
-        """
-        return f"""
-        <div style="font-family:Arial,sans-serif;min-width:260px;max-width:340px;">
-          <div style="background:{color_h};color:white;padding:8px 12px;
-                      border-radius:6px 6px 0 0;font-size:14px;">
-            🏥 <b>{aire}</b>
+        popup_html = f"""
+        <div style="font-family:Arial;font-size:13px;width:360px;line-height:1.5;">
+          <div style="background:#1976d2;color:white;padding:10px 14px;
+                      border-radius:6px 6px 0 0;margin:-10px -10px 10px -10px;">
+            <b style="font-size:15px;">🏥 {aire_name}</b> {badge}
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <colgroup><col style="width:58%"><col style="width:42%"></colgroup>
-            {lignes}
+          <b style="color:#d32f2f;">🦠 Épidémiologique</b>
+          <table style="width:100%;border-collapse:collapse;margin:6px 0;">
+            <tr style="background:#ffeaea;">
+              <td style="padding:5px 8px;">🔴 <b>Cas observés</b></td>
+              <td style="padding:5px 8px;text-align:right;">
+                <b style="font-size:18px;color:#d32f2f;">{cas_obs}</b></td></tr>
+            <tr>
+              <td style="padding:5px 8px;">📊 Taux d'attaque</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(taux_attaque, "{:.1f}", " /10 000 enf.")}</td></tr>
+          </table>
+          <b style="color:#1565c0;">👥 Population</b>
+          <table style="width:100%;border-collapse:collapse;margin:6px 0;">
+            <tr style="background:#e3f2fd;">
+              <td style="padding:5px 8px;">👥 Pop. totale</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(pop_totale, "{:,.0f}")}</td></tr>
+            <tr>
+              <td style="padding:5px 8px;">👶 Enfants 0-14 ans</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(pop_enfants, "{:,.0f}")}</td></tr>
+            <tr style="background:#e3f2fd;">
+              <td style="padding:5px 8px;">📐 Densité</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(densite, "{:.1f}", " hab/km²")}</td></tr>
+            <tr>
+              <td style="padding:5px 8px;">🏙️ Habitat</td>
+              <td style="padding:5px 8px;text-align:right;">
+                <b>{urbanisation}</b></td></tr>
+          </table>
+          <b style="color:#2e7d32;">💉 Vaccination & Climat</b>
+          <table style="width:100%;border-collapse:collapse;margin:6px 0;">
+            <tr style="background:#e8f5e9;">
+              <td style="padding:5px 8px;">💉 Taux vaccination</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(taux_vacc, "{:.1f}", "%")}</td></tr>
+            <tr>
+              <td style="padding:5px 8px;">🌡️ Température moy.</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(temp_moy, "{:.1f}", " °C")}</td></tr>
+            <tr style="background:#e8f5e9;">
+              <td style="padding:5px 8px;">💧 Humidité moy.</td>
+              <td style="padding:5px 8px;text-align:right;">
+                {fmt_val(hum_moy, "{:.1f}", " %")}</td></tr>
           </table>
         </div>"""
-    
-    sa_gdf_folium["_popup_html"] = sa_gdf_folium.apply(_make_popup_html, axis=1)
-    # ── Sérialisation JSON explicite — compatible upload ET fichier local ──
-    import json as _json
-    try:
-        _geojson_data = _json.loads(sa_gdf_folium.to_json())
-    except Exception as _e:
-        st.warning(f"⚠️ Erreur sérialisation GeoJSON : {_e}")
-        _geojson_data = _json.loads(sa_gdf_folium[["health_area", "geometry"]].to_json())
 
-    # Filtrage défensif : on garde uniquement les champs qui existent vraiment
-    _tooltip_candidates = [
-        ("health_area",        "Aire :"),
-        ("Cas_Observes",       "Cas :"),
-        ("Taux_Attaque_10000", "Taux /10k :"),
-        ("Pop_Enfants",        "Enfants 0-14 :"),
-        ("Urbanisation",       "Habitat :"),
-        ("Taux_Vaccination",   "Vaccination % :"),
-    ]
-    _popup_candidates = [
-        ("health_area",        "Aire de santé"),
-        ("Cas_Observes",       "Cas observés"),
-        ("Taux_Attaque_10000", "Taux attaque /10 000 enf."),
-        ("Pop_Totale",         "Pop. totale"),
-        ("Pop_Enfants",        "Enfants 0-14 ans"),
-        ("Densite_Pop",        "Densité (hab/km²)"),
-        ("Urbanisation",       "Habitat"),
-        ("Taux_Vaccination",   "Vaccination (%)"),
-        ("Temperature_Moy",    "Température moy. (°C)"),
-        ("Humidite_Moy",       "Humidité moy. (%)"),
-    ]
-    _existing_cols = list(sa_gdf_folium.columns)
-    _tt_fields   = [f for f, _ in _tooltip_candidates if f in _existing_cols]
-    _tt_aliases  = [a for f, a in _tooltip_candidates if f in _existing_cols]
-    _pop_fields  = [f for f, _ in _popup_candidates  if f in _existing_cols]
-    _pop_aliases = [a for f, a in _popup_candidates  if f in _existing_cols]
-
-    folium.GeoJson(
-        _geojson_data,
-        style_function=_style_func,
-        tooltip=folium.GeoJsonTooltip(
-            fields=_tt_fields,
-            aliases=_tt_aliases,
-            localize=True,
-            sticky=True,
-            labels=True,
-            style="font-family:Arial;font-size:13px;",
-        ),
-        popup=folium.GeoJsonPopup(
-        fields=["_popup_html"],
-        labels=False,
-        max_width=400,
-    ),
-    ).add_to(m)
-
-    
-
-        
-
-        # ── HeatMap ─────────────────────────────────────────────────
+        try:
+            geom = row["geometry"]
+            if geom is None or geom.is_empty:
+                continue
+            folium.GeoJson(
+                geom.__geo_interface__,
+                style_function=lambda x, c=fill_color, w=line_weight, bc=line_color: {
+                    "fillColor": c, "color": bc, "weight": w,
+                    "fillOpacity": 0.7, "opacity": 0.9
+                },
+                tooltip=folium.Tooltip(
+                    f"<b>{aire_name}</b><br>{cas_obs} cas", sticky=True),
+                popup=folium.Popup(popup_html, max_width=420)
+            ).add_to(m)
+        except Exception:
+            continue
+    # ── HeatMap
     heat_data = []
     for _, r in sa_gdf_with_cases.iterrows():
         try:
